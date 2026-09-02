@@ -39,10 +39,15 @@ export const AuthSessionCard: React.FC<AuthSessionCardProps> = ({
   trafficEvents = [],
   onRefreshTraffic
 }) => {
-  const [cpf, setCpf] = useState(authSession.cpf || '515.178.842-68');
-  const [password, setPassword] = useState('g.iMqq.Yu8KJqcY');
-  const [idPlano, setIdPlano] = useState(authSession.idPlano || 'HCOQIkjSk97gGcfGDPb0h');
+  // NÃO pre-populamos credenciais — usuário SEMPRE fornece a sua
+  const [cpf, setCpf] = useState(authSession.cpf || '');
+  const [password, setPassword] = useState('');
+  const [idPlano, setIdPlano] = useState(authSession.idPlano || '');
   const [showPassword, setShowPassword] = useState(false);
+  const [consentimentoAceito, setConsentimentoAceito] = useState(false);
+  const [modoExecucao, setModoExecucao] = useState<'DRY_RUN' | 'LIVE'>(
+    (authSession.modoExecucao as 'DRY_RUN' | 'LIVE') || 'DRY_RUN'
+  );
 
   // Filtros e Expansão de Logs DDP
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'read' | 'write'>('todos');
@@ -51,7 +56,17 @@ export const AuthSessionCard: React.FC<AuthSessionCardProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin({ cpf, password, idPlano });
+    if (!consentimentoAceito) {
+      alert('É necessário aceitar o consentimento antes de continuar.');
+      return;
+    }
+    onLogin({
+      cpf,
+      password,
+      idPlano,
+      consentimentoAceito,
+      modoExecucao
+    } as any);
   };
 
   const isAuth = authSession.status === 'authenticated' && !authSession.isExpired;
@@ -241,11 +256,67 @@ export const AuthSessionCard: React.FC<AuthSessionCardProps> = ({
               </p>
             </div>
 
+            {/* Seletor de modo de execução */}
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-2">
+                Modo de Execução
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModoExecucao('DRY_RUN')}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    modoExecucao === 'DRY_RUN'
+                      ? 'bg-slate-700 border-cyan-500/60 text-cyan-300'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  🧪 DRY_RUN
+                  <div className="text-[10px] font-normal mt-0.5 opacity-80">Simulação segura</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModoExecucao('LIVE')}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    modoExecucao === 'LIVE'
+                      ? 'bg-rose-950/40 border-rose-500/60 text-rose-300'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  ⚡ LIVE
+                  <div className="text-[10px] font-normal mt-0.5 opacity-80">Servidor real PNBOX</div>
+                </button>
+              </div>
+              {modoExecucao === 'LIVE' && (
+                <div className="mt-2 p-2.5 bg-rose-950/30 border border-rose-500/40 rounded-lg text-[11px] text-rose-200 leading-snug">
+                  ⚠️ <strong>Modo LIVE:</strong> os preenchimentos serão gravados no servidor real do PNBOX.
+                  Use apenas na sua própria conta e mantenha a sessão curta.
+                </div>
+              )}
+            </div>
+
+            {/* Consentimento explícito */}
+            <div className="pt-2 border-t border-slate-800">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={consentimentoAceito}
+                  onChange={(e) => setConsentimentoAceito(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-950 cursor-pointer"
+                />
+                <span className="text-[11px] text-slate-300 leading-snug">
+                  Confirmo que sou o titular da conta PNBOX informada, autorizo o Hub a usar minhas
+                  credenciais exclusivamente para automatizar o preenchimento do meu próprio plano,
+                  e estou ciente de que o uso automatizado pode ser registrado pelo PNBOX.
+                </span>
+              </label>
+            </div>
+
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl text-sm font-medium transition-colors"
+                disabled={isLoading || !consentimentoAceito}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 disabled:text-slate-600 border border-slate-700 text-slate-200 rounded-xl text-sm font-medium transition-colors disabled:cursor-not-allowed"
               >
                 Salvar & Reautenticar
               </button>

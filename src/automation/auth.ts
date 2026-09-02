@@ -1,4 +1,16 @@
 import { AuthSessionState } from '../types/pnbox';
+import { pnboxOidcLoginViaPlaywright } from './oidcPnboxPlaywright';
+
+/**
+ * Estado de autenticação PNBOX.
+ *
+ * IMPORTANTE: Este módulo NÃO armazena credenciais em disco ou em variáveis globais
+ * de longa duração. As credenciais do usuário são passadas a cada chamada
+ * `iniciarSessaoPlaywright(cpf, password)` e descartadas após o handshake.
+ *
+ * As credenciais históricas foram removidas para impedir uso não-autorizado.
+ * Agora o usuário SEMPRE fornece seu próprio CPF/senha na UI.
+ */
 
 export interface Credentials {
   cpf: string;
@@ -6,129 +18,203 @@ export interface Credentials {
   idPlano: string;
 }
 
-export const CREDENCIAIS_PADRAO: Credentials = {
-  cpf: '515.178.842-68',
-  password: 'g.iMqq.Yu8KJqcY',
-  idPlano: 'HCOQIkjSk97gGcfGDPb0h'
+/**
+ * CREDENCIAIS_PADRAO_DEPRECATED — stub vazio para compatibilidade.
+ * O playwrightScriptGenerator.ts usa isso só para preencher a string de código
+ * gerado para o usuário rodar LOCALMENTE. Não é usado para autenticar o Hub.
+ *
+ * Use sempre a UI para inserir credenciais.
+ */
+export const CREDENCIAIS_PADRAO = {
+  cpf: '',
+  password: '',
+  idPlano: ''
 };
 
-// Tempo de vida da sessão do PNBOX em minutos
-export const TEMPO_VIDA_SESSAO_MINUTOS = 60;
+/**
+ * @deprecated Não use — credenciais devem vir SEMPRE da UI.
+ */
+export const CREDENCIAIS_PADRAO_DEPRECATED = CREDENCIAIS_PADRAO;
 
-// Estado global em memória da sessão autenticada
+/**
+ * Sessão ativa — apenas runtime, nunca persistida em disco.
+ * Substitui credenciais por tokens OIDC + cookies após autenticação.
+ */
+export interface SessaoPnbox {
+  cookiesPnbox: string;
+  idToken: string;
+  accessToken: string;
+  refreshToken?: string;
+  meteorSessionId?: string;
+  meteorUserId?: string;
+  cpf: string;
+  idPlano: string;
+  autenticadoEm: string;
+  expiraEm: string;
+}
+
+// Tempo de vida da sessão em minutos (TTL do token OIDC + margem)
+export const TEMPO_VIDA_SESSAO_MINUTOS = 50;
+
+/**
+ * Sessão ativa em memória. É substituída a cada novo login e descartada
+ * quando o servidor reinicia.
+ */
+let sessaoAtual: SessaoPnbox | null = null;
+
+export function obterSessaoAtual(): SessaoPnbox | null {
+  if (!sessaoAtual) return null;
+  if (new Date(sessaoAtual.expiraEm).getTime() <= Date.now()) {
+    sessaoAtual = null;
+    return null;
+  }
+  return sessaoAtual;
+}
+
+export function obterCookiesPnbox(): string | null {
+  const s = obterSessaoAtual();
+  return s?.cookiesPnbox || null;
+}
+
+/**
+ * Estado exposto para a UI (AuthSessionState).
+ * Deriva do sessaoAtual.
+ */
 export const globalAuthState: AuthSessionState = {
-  status: 'authenticated',
-  cpf: CREDENCIAIS_PADRAO.cpf,
-  idPlano: CREDENCIAIS_PADRAO.idPlano,
-  meteorLoginToken: 'pnbox_meteor_token_live_ddp_' + Date.now().toString(36),
-  meteorUserId: 'usr_sebrae_pnbox_official',
-  autenticadoEm: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000).toISOString(),
-  isExpired: false,
-  tempoRestanteMinutos: TEMPO_VIDA_SESSAO_MINUTOS,
-  isOnline: true,
-  ultimoPing: new Date().toISOString(),
-  cookiesCount: 3,
+  status: 'idle',
+  cpf: '',
+  idPlano: '',
+  modoExecucao: 'DRY_RUN',
   logs: [
     {
       timestamp: new Date().toISOString(),
-      mensagem: 'Módulo de autenticação inicializado e conectado com o backend do PNBOX.',
-      level: 'success'
+      mensagem:
+        'Módulo de autenticação pronto. Forneça CPF + senha na aba "Sessão Playwright" para conectar ao PNBOX.',
+      level: 'info'
     }
   ]
 };
 
 export function addAuthLog(mensagem: string, level: 'info' | 'warn' | 'error' | 'success' = 'info') {
-  const entry = {
-    timestamp: new Date().toISOString(),
-    mensagem,
-    level
-  };
+  const entry = { timestamp: new Date().toISOString(), mensagem, level };
   globalAuthState.logs.unshift(entry);
   if (globalAuthState.logs.length > 100) globalAuthState.logs.pop();
   globalAuthState.ultimoLog = mensagem;
-  console.log(`[PNBOX Auth] [${level.toUpperCase()}] ${mensagem}`);
+  // NÃO logar credenciais
+  if (!level || level === 'info' || level === 'success' || level === 'warn' || level === 'error') {
+    console.log(`[PNBOX Auth] [${level.toUpperCase()}] ${mensagem}`);
+  }
 }
 
-/**
- * Atualiza e retorna o status atualizado da sessão, verificando se expirou
- */
 export function obterStatusSessaoAtualizada(): AuthSessionState {
-  globalAuthState.ultimoPing = new Date().toISOString();
-  globalAuthState.isOnline = true;
+  const sessao = obterSessaoAtual();
 
-  if (globalAuthState.status === 'authenticated' && globalAuthState.autenticadoEm) {
-    const authTime = new Date(globalAuthState.autenticadoEm).getTime();
-    const expiresTime = globalAuthState.expiresAt
-      ? new Date(globalAuthState.expiresAt).getTime()
-      : authTime + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000;
-
-    const agora = Date.now();
-    const restanteMs = expiresTime - agora;
-
-    if (restanteMs <= 0) {
-      globalAuthState.isExpired = true;
-      globalAuthState.status = 'expired';
-      globalAuthState.tempoRestanteMinutos = 0;
-      addAuthLog('Sessão com o backend do PNBOX expirou. Necessário reautenticar.', 'warn');
-    } else {
-      globalAuthState.isExpired = false;
-      globalAuthState.tempoRestanteMinutos = Math.max(0, Math.round(restanteMs / (60 * 1000)));
-    }
-  } else if (globalAuthState.status === 'expired') {
-    globalAuthState.isExpired = true;
+  if (!sessao) {
+    globalAuthState.status = 'idle';
+    globalAuthState.isExpired = false;
     globalAuthState.tempoRestanteMinutos = 0;
+    globalAuthState.meteorLoginToken = undefined;
+    globalAuthState.meteorUserId = undefined;
+    globalAuthState.ultimoPing = new Date().toISOString();
+    globalAuthState.isOnline = false;
+    return globalAuthState;
   }
 
+  const restanteMs = new Date(sessao.expiraEm).getTime() - Date.now();
+  const restanteMin = Math.max(0, Math.round(restanteMs / 60000));
+
+  globalAuthState.status = restanteMin > 0 ? 'authenticated' : 'expired';
+  globalAuthState.isExpired = restanteMin <= 0;
+  globalAuthState.tempoRestanteMinutos = restanteMin;
+  globalAuthState.cpf = sessao.cpf;
+  globalAuthState.idPlano = sessao.idPlano;
+  globalAuthState.meteorLoginToken = sessao.idToken.substring(0, 24) + '...';
+  globalAuthState.meteorUserId = sessao.meteorUserId;
+  globalAuthState.autenticadoEm = sessao.autenticadoEm;
+  globalAuthState.expiresAt = sessao.expiraEm;
+  globalAuthState.cookiesCount = sessao.cookiesPnbox
+    ? sessao.cookiesPnbox.split(';').length
+    : 0;
+  globalAuthState.isOnline = true;
+  globalAuthState.ultimoPing = new Date().toISOString();
+
   return globalAuthState;
 }
 
-/**
- * Permite forçar expiração para testes da interface
- */
 export function simularExpiracaoSessao(): AuthSessionState {
-  globalAuthState.isExpired = true;
+  sessaoAtual = null;
   globalAuthState.status = 'expired';
+  globalAuthState.isExpired = true;
   globalAuthState.tempoRestanteMinutos = 0;
-  globalAuthState.expiresAt = new Date(Date.now() - 1000).toISOString();
-  addAuthLog('Expiração da sessão simulada manualmente pelo usuário para teste de reconexão.', 'warn');
+  addAuthLog(
+    'Sessão encerrada manualmente pelo usuário — necessário novo login.',
+    'warn'
+  );
   return globalAuthState;
 }
 
 /**
- * Inicializador da sessão de autenticação do PNBOX
- * Executado no backend (Node/Playwright/DDP Handshake)
+ * Autentica o usuário no PNBOX via fluxo OIDC real (Keycloak AMEI).
+ *
+ * @param credentials CPF + senha fornecidos pelo próprio usuário na UI
+ * @param consentimentoAceito TRUE se o usuário marcou o checkbox de consentimento
  */
-export async function iniciarSessaoPlaywright(credenciais = CREDENCIAIS_PADRAO): Promise<AuthSessionState> {
+export async function iniciarSessaoPlaywright(
+  credentials: Credentials,
+  consentimentoAceito: boolean = false
+): Promise<AuthSessionState> {
+  if (!consentimentoAceito) {
+    globalAuthState.status = 'failed';
+    addAuthLog(
+      'Login bloqueado — usuário não marcou o consentimento de uso das credenciais.',
+      'error'
+    );
+    return globalAuthState;
+  }
+
   globalAuthState.status = 'authenticating';
-  globalAuthState.cpf = credenciais.cpf;
-  globalAuthState.idPlano = credenciais.idPlano;
-  addAuthLog(`Iniciando autenticação para CPF: ${credenciais.cpf} no plano ${credenciais.idPlano}...`, 'info');
+  globalAuthState.cpf = credentials.cpf;
+  globalAuthState.idPlano = credentials.idPlano;
+
+  // Sanitizar CPF no log (apenas primeiros 3 dígitos)
+  const cpfMascarado = credentials.cpf
+    ? credentials.cpf.substring(0, 3) + '.***.***-' + credentials.cpf.slice(-2)
+    : '(vazio)';
+  addAuthLog(`Iniciando autenticação OIDC para CPF ${cpfMascarado}...`, 'info');
 
   try {
-    // Simulação do handshake e extração de token Meteor no servidor
-    addAuthLog('Navegando até https://pnbox.sebrae.com.br/planoNegocio/ferramentas/' + credenciais.idPlano, 'info');
-    addAuthLog(`Preenchendo CPF ${credenciais.cpf} no Sebrae SSO ID...`, 'info');
-    addAuthLog('Preenchendo Senha de acesso e confirmando login...', 'info');
+    const result = await pnboxOidcLoginViaPlaywright(credentials.cpf, credentials.password);
 
-    // Token extraído com sucesso
     const agora = Date.now();
-    globalAuthState.meteorLoginToken = 'pnbox_meteor_token_' + Math.random().toString(36).substring(2, 12) + '_' + agora;
-    globalAuthState.meteorUserId = 'usr_sebrae_pnbox_' + Math.random().toString(36).substring(2, 8);
-    globalAuthState.cookiesCount = 3;
+    sessaoAtual = {
+      cookiesPnbox: result.pnboxCookies,
+      idToken: result.idToken,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      meteorSessionId: undefined, // Será preenchido na primeira conexão DDP
+      cpf: credentials.cpf,
+      idPlano: credentials.idPlano,
+      autenticadoEm: new Date(agora).toISOString(),
+      expiraEm: new Date(agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000).toISOString()
+    };
+
     globalAuthState.status = 'authenticated';
-    globalAuthState.autenticadoEm = new Date(agora).toISOString();
-    globalAuthState.expiresAt = new Date(agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000).toISOString();
+    globalAuthState.autenticadoEm = sessaoAtual.autenticadoEm;
+    globalAuthState.expiresAt = sessaoAtual.expiraEm;
     globalAuthState.isExpired = false;
     globalAuthState.tempoRestanteMinutos = TEMPO_VIDA_SESSAO_MINUTOS;
     globalAuthState.isOnline = true;
-    globalAuthState.ultimoPing = new Date().toISOString();
+    globalAuthState.ultimoPing = new Date(agora).toISOString();
 
-    addAuthLog('Sessão autenticada com sucesso! Token de persistência DDP extraído e ativo.', 'success');
-    return globalAuthState;
+    addAuthLog(
+      `Autenticação OIDC concluída. ${result.pnboxCookies ? 'Cookies PNBOX' : 'Sem cookies'} prontos para DDP.`,
+      'success'
+    );
+
+    return obterStatusSessaoAtualizada();
   } catch (err: any) {
     globalAuthState.status = 'failed';
-    addAuthLog(`Erro na autenticação: ${err.message}`, 'error');
+    addAuthLog(`Falha na autenticação OIDC: ${err.message}`, 'error');
     return globalAuthState;
   }
 }

@@ -6,9 +6,9 @@ import { compararJsonComSchema, compararDoisJson } from './src/automation/schema
 import {
   globalAuthState,
   iniciarSessaoPlaywright,
-  CREDENCIAIS_PADRAO,
   obterStatusSessaoAtualizada,
-  simularExpiracaoSessao
+  simularExpiracaoSessao,
+  obterCookiesPnbox
 } from './src/automation/auth';
 import {
   obterEventosTrafego,
@@ -18,7 +18,8 @@ import {
 } from './src/automation/trafficMonitor';
 import { TEMPLATES_NEGOCIO } from './src/automation/businessTemplates';
 import { gerarScriptPlaywrightOficial, gerarScriptCriarNovoPlanoPlaywright } from './src/automation/playwrightScriptGenerator';
-import { executarFerramentaNoPnbox, prepararEstruturaExecucao } from './src/automation/officialRunner';
+import { executarFerramentaNoPnbox as executarFerramentaMock } from './src/automation/officialRunner';
+import { executarFerramentaNoPnbox as executarFerramentaReal, prepararEstruturaExecucao } from './src/automation/realRunner';
 import { executarDeepResearch, sintetizar14FerramentasPnbox } from './src/automation/geminiDeepResearch';
 import { executarPesquisaUnificada, getNvidiaApiKey, NVIDIA_DEFAULT_MODELS } from './src/automation/aiProviders';
 import { SchemaGenerator } from './src/utils/schemaGenerator';
@@ -90,14 +91,35 @@ async function startServer() {
   });
 
   app.post('/api/automation/auth/login', async (req, res) => {
-    const { cpf, password, idPlano } = req.body || {};
+    const { cpf, password, idPlano, consentimentoAceito, modoExecucao } = req.body || {};
+
+    if (!cpf || !password) {
+      return res.status(400).json({
+        status: 'error',
+        mensagem: 'CPF e senha são obrigatórios.'
+      });
+    }
+
+    if (!consentimentoAceito) {
+      return res.status(400).json({
+        status: 'error',
+        mensagem: 'É necessário aceitar o consentimento de uso das credenciais.'
+      });
+    }
+
+    if (modoExecucao === 'LIVE') {
+      globalAuthState.modoExecucao = 'LIVE';
+    } else {
+      globalAuthState.modoExecucao = 'DRY_RUN';
+    }
+
     const credenciais = {
-      cpf: cpf || CREDENCIAIS_PADRAO.cpf,
-      password: password || CREDENCIAIS_PADRAO.password,
-      idPlano: idPlano || CREDENCIAIS_PADRAO.idPlano
+      cpf: String(cpf).trim(),
+      password: String(password),
+      idPlano: idPlano || ID_PLANO_PADRAO
     };
 
-    const sessionResult = await iniciarSessaoPlaywright(credenciais);
+    const sessionResult = await iniciarSessaoPlaywright(credenciais, consentimentoAceito);
     res.json({
       status: sessionResult.status === 'authenticated' ? 'ok' : 'error',
       session: sessionResult
@@ -106,18 +128,38 @@ async function startServer() {
 
   // 4. Execução de Preenchimento Oficial do PNBOX (Individual ou em Lote)
   app.post('/api/automation/fill-tool', async (req, res) => {
-    const { ferramentaId, registros, idPlano } = req.body || {};
+    const { ferramentaId, registros, idPlano, modoExecucao } = req.body || {};
     const plano = idPlano || ID_PLANO_PADRAO;
+    const modo = modoExecucao || globalAuthState.modoExecucao || 'DRY_RUN';
 
     try {
-      const stepResult = await executarFerramentaNoPnbox(
-        ferramentaId,
-        Array.isArray(registros) ? registros : [registros],
-        plano
-      );
+      let stepResult;
+      if (modo === 'LIVE') {
+        const cookies = obterCookiesPnbox();
+        if (!cookies) {
+          return res.status(401).json({
+            status: 'error',
+            mensagem: 'Modo LIVE solicitado mas não há sessão autenticada. Faça login primeiro.'
+          });
+        }
+        stepResult = await executarFerramentaReal(
+          ferramentaId,
+          Array.isArray(registros) ? registros : [registros],
+          plano,
+          cookies
+        );
+      } else {
+        // DRY_RUN: usa o runner mock (simulação)
+        stepResult = await executarFerramentaMock(
+          ferramentaId,
+          Array.isArray(registros) ? registros : [registros],
+          plano
+        );
+      }
 
       res.json({
         status: 'ok',
+        modoExecucao: modo,
         resultado: stepResult
       });
     } catch (err: any) {
@@ -126,9 +168,22 @@ async function startServer() {
   });
 
   app.post('/api/automation/fill-batch', async (req, res) => {
-    const { templateId, idPlano, customData, delayBetweenToolsMs = 0 } = req.body || {};
+    const { templateId, idPlano, customData, delayBetweenToolsMs = 0, modoExecucao } = req.body || {};
     const plano = idPlano || ID_PLANO_PADRAO;
+    const modo = modoExecucao || globalAuthState.modoExecucao || 'DRY_RUN';
     const template = TEMPLATES_NEGOCIO.find((t) => t.id === templateId) || TEMPLATES_NEGOCIO[0];
+
+    // No modo LIVE, exigimos sessão autenticada
+    let cookies: string | null = null;
+    if (modo === 'LIVE') {
+      cookies = obterCookiesPnbox();
+      if (!cookies) {
+        return res.status(401).json({
+          status: 'error',
+          mensagem: 'Modo LIVE solicitado mas não há sessão autenticada. Faça login primeiro.'
+        });
+      }
+    }
 
     const executionSummary = prepararEstruturaExecucao(template.id, plano);
     executionSummary.statusGeral = 'executing';
@@ -142,7 +197,9 @@ async function startServer() {
       if (!f) continue;
 
       const registros = dadosParaUsar[f.collectionName] || [f.exemploPayload];
-      const result = await executarFerramentaNoPnbox(f.id, registros, plano);
+      const result = modo === 'LIVE'
+        ? await executarFerramentaReal(f.id, registros, plano, cookies!)
+        : await executarFerramentaMock(f.id, registros, plano);
 
       step.status = result.status;
       step.registrosSalvos = result.registrosSalvos;
@@ -158,7 +215,6 @@ async function startServer() {
         executionSummary.ferramentasFalha++;
       }
 
-      // Intervalo configurável entre ferramentas
       if (delayBetweenToolsMs > 0 && i < executionSummary.steps.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, Number(delayBetweenToolsMs)));
       }
@@ -170,6 +226,7 @@ async function startServer() {
 
     res.json({
       status: 'ok',
+      modoExecucao: modo,
       resumo: executionSummary
     });
   });
@@ -501,6 +558,34 @@ async function startServer() {
   // Rota de Health Check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', server: 'PNBOX Automation Hub API', timestamp: new Date().toISOString() });
+  });
+
+  // Toggle de modo de execução (LIVE ↔ DRY_RUN)
+  app.post('/api/automation/mode', (req, res) => {
+    const { modoExecucao } = req.body || {};
+    if (modoExecucao !== 'LIVE' && modoExecucao !== 'DRY_RUN') {
+      return res.status(400).json({
+        status: 'error',
+        mensagem: 'modoExecucao deve ser "LIVE" ou "DRY_RUN".'
+      });
+    }
+
+    if (modoExecucao === 'LIVE' && !obterCookiesPnbox()) {
+      return res.status(401).json({
+        status: 'error',
+        mensagem: 'Não é possível ativar LIVE sem sessão autenticada. Faça login primeiro.'
+      });
+    }
+
+    globalAuthState.modoExecucao = modoExecucao;
+    res.json({
+      status: 'ok',
+      modoExecucao,
+      mensagem:
+        modoExecucao === 'LIVE'
+          ? '⚠️ MODO LIVE ATIVADO — preenchimentos serão gravados no servidor real do PNBOX.'
+          : 'Modo DRY_RUN ativado — preenchimentos são simulados.'
+    });
   });
 
   // Vite middleware setup
