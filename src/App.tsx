@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Header } from './components/Header';
 import { OfficialFillerPanel } from './components/OfficialFillerPanel';
 import { BatchProcessingQueue } from './components/BatchProcessingQueue';
@@ -10,13 +10,14 @@ import { AuthSessionCard } from './components/AuthSessionCard';
 import { DirectExecutionModal } from './components/DirectExecutionModal';
 import { AiPlanCreatorStudio } from './components/AiPlanCreatorStudio';
 import { PlanSwitcherModal } from './components/PlanSwitcherModal';
+import { Toast, ToastMessage } from './components/Toast';
 import {
   AuthSessionState,
   FerramentaInfo,
   InterceptedTrafficEvent
 } from './types/pnbox';
 import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from './automation/schemaCatalog';
-import { CREDENCIAIS_PADRAO } from './automation/auth';
+import { authFetch } from './utils/authFetch';
 import { TEMPLATES_NEGOCIO, BusinessTemplate } from './automation/businessTemplates';
 import { salvarPlanoNoHistorico } from './utils/planUtils';
 import { Building2, Edit3, ExternalLink, Plus, Sparkles, CheckCircle2 } from 'lucide-react';
@@ -30,17 +31,15 @@ export function App() {
   const [eventosTrafego, setEventosTrafego] = useState<InterceptedTrafficEvent[]>([]);
   const [showGlobalPlanModal, setShowGlobalPlanModal] = useState<boolean>(false);
   const [authSession, setAuthSession] = useState<AuthSessionState>({
-    status: 'authenticated',
-    cpf: CREDENCIAIS_PADRAO.cpf,
+    status: 'idle',
+    cpf: '',
     idPlano: ID_PLANO_PADRAO,
-    meteorLoginToken: 'pnbox_session_live_ddp_token',
-    meteorUserId: 'usr_sebrae_pnbox_official',
-    autenticadoEm: new Date().toISOString(),
+    modoExecucao: 'DRY_RUN',
     logs: [
       {
         timestamp: new Date().toISOString(),
-        mensagem: 'Painel e sessão inicializados para automação do Sebrae PNBOX.',
-        level: 'success'
+        mensagem: 'Painel pronto. Forneça CPF/senha na aba "Sessão Playwright" para conectar.',
+        level: 'info'
       }
     ]
   });
@@ -117,11 +116,9 @@ export function App() {
     }
   };
 
-  useEffect(() => {
-    carregarDados();
-  }, []);
+  // Efeito "boot" antigo removido — o novo "Efeito 1" abaixo já chama carregarDados().
 
-  const handleLogin = async (cred: { cpf: string; password: string; idPlano: string }) => {
+  const handleLogin = async (cred: { cpf: string; password: string; idPlano: string; consentimentoAceito: boolean; modoExecucao: 'DRY_RUN' | 'LIVE' }) => {
     setIsLoadingAuth(true);
     try {
       const res = await fetch('/api/automation/auth/login', {
@@ -130,8 +127,28 @@ export function App() {
         body: JSON.stringify(cred)
       });
       const data = await res.json();
+      if (!res.ok) {
+        pushToast({
+          level: 'error',
+          title: 'Falha no login',
+          message: data.mensagem || `HTTP ${res.status}`,
+          duration: 6000,
+          icon: 'error'
+        });
+        return;
+      }
       if (data.session) {
         setAuthSession(data.session);
+        const isLive = cred.modoExecucao === 'LIVE';
+        pushToast({
+          level: isLive ? 'warn' : 'success',
+          title: isLive ? 'Login LIVE concluído' : 'Login DRY_RUN concluído',
+          message: isLive
+            ? `Sessão autenticada no PNBOX real. Preenchimentos serão gravados no servidor.`
+            : `Sessão autenticada (simulação). Preenchimentos não tocam o servidor real.`,
+          duration: 5000,
+          icon: isLive ? 'warn' : 'check'
+        });
       }
       // Atualizar lista de tráfego
       const resTraffic = await fetch('/api/automation/traffic');
@@ -140,7 +157,13 @@ export function App() {
         setEventosTrafego(dataTraffic.eventos || []);
       }
     } catch (err: any) {
-      alert(`Erro na autenticação: ${err.message}`);
+      pushToast({
+        level: 'error',
+        title: 'Erro na autenticação',
+        message: err?.message || 'Falha desconhecida',
+        duration: 6000,
+        icon: 'error'
+      });
     } finally {
       setIsLoadingAuth(false);
     }
@@ -164,6 +187,131 @@ export function App() {
       console.error(err);
     }
   };
+
+  // ============== AUTO-RECONEXÃO DE SESSÃO EXPIRADA ==============
+  // Quando a sessão expira (por tempo ou por recarga), reconectamos
+  // automaticamente com as credenciais padrão, sem exigir clique do usuário.
+  // Estratégia:
+  //   1. Na carga inicial (já presente em carregarDados)
+  //   2. No polling de 60s (useEffect abaixo)
+  //   3. No refresh manual (chamado pelo Header onRefreshAuth)
+  // Anti-loop: timestamp mínimo entre tentativas (60s).
+  // ============================================================================
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isAutoReconnecting, setIsAutoReconnecting] = useState<boolean>(false);
+  const lastAutoReconnectAttemptRef = useRef<number>(0);
+  const AUTO_RECONNECT_DEBOUNCE_MS = 60_000; // máx 1 tentativa a cada 60s
+
+  const pushToast = useCallback((toast: Omit<ToastMessage, 'id'>) => {
+    const id = 'toast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    const newToast: ToastMessage = { id, ...toast };
+    setToasts((prev) => [...prev, newToast]);
+    // Auto-dismiss depois de duration ms (default 4s, exceto 'reconnecting' = 0)
+    const duration = toast.duration ?? 4000;
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, duration);
+    }
+    return id;
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const autoReconnect = useCallback(async () => {
+    const agora = Date.now();
+    // Anti-loop: respeitar debounce
+    if (agora - lastAutoReconnectAttemptRef.current < AUTO_RECONNECT_DEBOUNCE_MS) {
+      return false;
+    }
+    // Se já estamos tentando, não tenta de novo
+    if (isAutoReconnecting) {
+      return false;
+    }
+    // Só tenta se está expirada (ou falhou)
+    const sessaoAtualExpirada =
+      authSession.status === 'expired' ||
+      authSession.isExpired === true ||
+      authSession.status === 'failed';
+    if (!sessaoAtualExpirada) {
+      return false;
+    }
+
+    lastAutoReconnectAttemptRef.current = agora;
+    setIsAutoReconnecting(true);
+
+    const reconnectingToastId = pushToast({
+      level: 'info',
+      title: 'Reconectando sessão PNBOX',
+      message: 'Detectamos que sua sessão expirou. Renovando automaticamente...',
+      duration: 2500, // visual de progresso (sucesso/falha sempre substitui ou remove)
+      icon: 'loading'
+    });
+
+    try {
+      // NÃO chamar /auth/login automaticamente — sem credenciais salvas,
+      // isso falharia. Apenas orientar o usuário a autenticar manualmente.
+      // (Implementação anterior usava credenciais hardcoded — risco de segurança.)
+      dismissToast(reconnectingToastId);
+      pushToast({
+        level: 'warn',
+        title: 'Sessão PNBOX expirada',
+        message: 'Por segurança, o Hub não reconecta automaticamente sem credenciais. ' +
+                 'Abra a aba "Sessão Playwright", insira CPF/senha e clique em "Salvar & Reautenticar".',
+        duration: 8000,
+        icon: 'warn'
+      });
+      return false;
+    } catch (err: any) {
+      dismissToast(reconnectingToastId);
+      pushToast({
+        level: 'error',
+        title: 'Falha ao verificar reconexão',
+        message: err?.message || 'Erro desconhecido',
+        duration: 6000,
+        icon: 'error'
+      });
+      return false;
+    } finally {
+      setIsAutoReconnecting(false);
+    }
+  }, [authSession, isAutoReconnecting, pushToast, dismissToast]);
+
+  // Efeito 1: ao montar, carregar dados. Se vier expirado, tenta reconectar.
+  useEffect(() => {
+    carregarDados();
+  }, []);
+
+  // Efeito 2: polling a cada 60s para detectar expiração durante uso prolongado.
+  useEffect(() => {
+    const intervalId = setInterval(async () => {
+      try {
+        const res = await fetch('/api/automation/auth/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.session) {
+          setAuthSession(data.session);
+          // Se o servidor reportou expirada, tenta reconectar
+          if (data.session.status === 'expired' || data.session.isExpired === true) {
+            autoReconnect();
+          }
+        }
+      } catch (e) {
+        // Silencioso — não perturba o usuário em falha de polling
+        console.warn('[Polling auth] Falha ao checar sessão:', e);
+      }
+    }, 60_000); // 60 segundos
+    return () => clearInterval(intervalId);
+  }, [autoReconnect]);
+
+  // Efeito 3: sempre que o status mudar para 'expired', tenta reconectar.
+  useEffect(() => {
+    if (authSession.status === 'expired' || authSession.isExpired === true) {
+      autoReconnect();
+    }
+  }, [authSession.status, authSession.isExpired, autoReconnect]);
 
   const handleSelectFerramentaForValidation = (ferramenta: FerramentaInfo) => {
     setFerramentaParaValidar(ferramenta);
@@ -374,6 +522,9 @@ export function App() {
         }}
         onNavigateTab={setActiveTab}
       />
+
+      {/* Container de Toasts (auto-reconexão, avisos, etc.) */}
+      <Toast toasts={toasts} onDismiss={dismissToast} />
 
       {/* Rodapé */}
       <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500 font-mono">

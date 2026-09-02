@@ -65,8 +65,9 @@ export interface JsonDiffResult {
 }
 
 export interface AuthSessionState {
-  status: 'idle' | 'authenticating' | 'authenticated' | 'failed' | 'expired';
+  status: 'idle' | 'authenticating' | 'authenticated' | 'failed' | 'expired' | 'reconnecting';
   cpf: string;
+  modoExecucao: 'DRY_RUN' | 'LIVE'; // Indica se execuções tocam servidor real ou são simuladas
   idPlano: string;
   meteorLoginToken?: string;
   meteorUserId?: string;
