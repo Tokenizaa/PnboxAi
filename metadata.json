@@ -1,6 +1,6 @@
 {
   "name": "PNBOX Automation Hub & Protocol Inspector",
-  "description": "Painel de controle técnico para mapeamento, engenharia reversa de tráfego, autenticação Playwright e automação direta das 14 ferramentas do PNBOX Sebrae.",
+  "description": "Plataforma oficial com design autêntico do Sebrae PNBOX integrada com IA Copilot para modelagem, preenchimento e sincronização direta das 14 ferramentas de negócio.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

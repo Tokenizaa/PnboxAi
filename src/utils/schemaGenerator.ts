@@ -328,4 +328,63 @@ export class SchemaGenerator {
       avisos
     };
   }
+
+  /**
+   * Helper unificado para gerar todos os schemas das 14 ferramentas
+   */
+  static gerarTodosOsSchemas(
+    info: any,
+    idPlano: string = ID_PLANO_PADRAO
+  ): Record<string, Record<string, unknown>[]> {
+    if (!info) {
+      return this.generateForTemplate('defesai_adeus_multas', idPlano);
+    }
+
+    // Se já for um DeepResearchReport completo
+    if (info.buyerPersona && info.investimentoEstimado) {
+      return this.generateFromResearch(info as DeepResearchReport, idPlano);
+    }
+
+    // Normaliza para o formato esperado por generateFromResearch
+    const reportNormalizado: DeepResearchReport = {
+      promptOriginal: info.resumoExecutivo || info.descricao || 'Plano de Negócio Sebrae',
+      nomeNegocioSugerido: info.nomeEmpresa || info.nomePlano || 'Novo Empreendimento',
+      setor: info.setor || 'Serviços & Inovação',
+      cidadeUf: info.cidadeUf || 'São Paulo / SP',
+      resumoExecutivo: info.resumoExecutivo || info.descricao || 'Empresa inovadora com foco em alta eficiência e excelência.',
+      oportunidadeMercado: 'Crescimento de demanda qualificada com necessidade de soluções digitais.',
+      tendencias2025_2026: ['Automação digital', 'Inteligência Artificial', 'Atendimento sob demanda'],
+      concorrentesMapeados: [
+        {
+          nome: 'Operadores Tradicionais',
+          pontosFortes: 'Reconhecimento de mercado local',
+          pontosFracos: 'Lentidão e custos elevados',
+          diferenciacao: 'Atendimento inteligente e agilidade superior'
+        }
+      ],
+      buyerPersona: {
+        nome: 'Cliente Qualificado',
+        idade: '28 a 55 anos',
+        perfil: 'Pessoa física ou gestor de empresa que valoriza tempo e segurança',
+        dores: ['Processos burocráticos e perda de tempo'],
+        desejos: ['Solução rápida, assertiva e confiável'],
+        ticketMedio: 250
+      },
+      investimentoEstimado: {
+        capexTotal: info.orcamentoEstimado || 85000,
+        opexMensal: Math.round((info.orcamentoEstimado || 85000) * 0.25),
+        pontoEquilibrioMeses: 12,
+        faturamentoEstimadoMensal: Math.round((info.orcamentoEstimado || 85000) * 0.45)
+      },
+      aspectosLegaisTributarios: {
+        cnaeSugerido: '6201-5/01 - Desenvolvimento e consultoria',
+        regimeTributario: 'Simples Nacional',
+        licencasExigidas: ['Alvará de Funcionamento']
+      },
+      fontesPesquisa: [{ titulo: 'Sebrae PNBOX Oficial', uri: 'https://pnbox.sebrae.com.br' }],
+      geradoEm: new Date().toISOString()
+    };
+
+    return this.generateFromResearch(reportNormalizado, idPlano);
+  }
 }

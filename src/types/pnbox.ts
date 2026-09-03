@@ -42,6 +42,18 @@ export interface InterceptedTrafficEvent {
     acao?: 'insert' | 'update' | 'remove' | 'sub' | 'login' | 'statusConclusao' | 'save';
     collection?: string;
   };
+  horario?: string;
+  payload?: unknown;
+}
+
+export type EventoTrafego = InterceptedTrafficEvent;
+
+export interface CredenciaisLogin {
+  cpf: string;
+  password?: string;
+  idPlano?: string;
+  modoExecucao?: 'DRY_RUN' | 'LIVE';
+  consentimentoAceito?: boolean;
 }
 
 export interface JsonDiffResult {
@@ -78,6 +90,7 @@ export interface AuthSessionState {
   expiresAt?: string;
   isExpired?: boolean;
   tempoRestanteMinutos?: number;
+  tempoRestanteFormatado?: string;
   isOnline?: boolean;
   ultimoPing?: string;
 }
@@ -180,6 +193,8 @@ export interface PlanoCriadoInfo {
   pesquisaMercado?: DeepResearchReport;
   dados14Ferramentas?: Record<string, Record<string, unknown>[]>;
   ferramentasPreenchidas?: number;
+  categoriaObjetivo?: string;
+  icone?: string;
 }
 
 // Provedores de IA

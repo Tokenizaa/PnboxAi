@@ -7,25 +7,51 @@ export const ID_PLANO_PADRAO_SISTEMA = 'HCOQIkjSk97gGcfGDPb0h';
 export const PLANOS_EXEMPLO_INICIAIS: PlanoCriadoInfo[] = [
   {
     idPlano: ID_PLANO_PADRAO_SISTEMA,
-    nomePlano: 'Cafeteria Especial & Coworking Criativo',
-    setor: 'Alimentação & Coworking',
-    descricao: 'Plano padrão com microlotes de café especial e estações compartilhadas de alta velocidade.',
-    cidadeUf: 'Curitiba / PR',
+    nomePlano: 'Defesai/AdeusMultas',
+    setor: 'Legaltech & Gestão de Multas de Trânsito',
+    descricao: 'Automação inteligente para defesas de multas de trânsito NIC para frotas e pessoas físicas.',
+    cidadeUf: 'Brasil / Nacional',
+    criadoEm: new Date(Date.now() - 3600000 * 72).toISOString(),
+    status: 'preenchido_completo',
+    metodoCriacao: 'ddp_direct',
+    ferramentasPreenchidas: 14,
+    categoriaObjetivo: 'Criar um novo negócio'
+  },
+  {
+    idPlano: 'tokeniza_contratos',
+    nomePlano: 'Tokeniza Contratos Inteligentes',
+    setor: 'Fintech & Web3 / RWA',
+    descricao: 'Auxílio na gestão, tokenização de ativos reais e formalização descentralizada de contratos.',
+    cidadeUf: 'São Paulo / SP',
     criadoEm: new Date(Date.now() - 3600000 * 48).toISOString(),
     status: 'preenchido_completo',
     metodoCriacao: 'ddp_direct',
-    ferramentasPreenchidas: 14
+    ferramentasPreenchidas: 14,
+    categoriaObjetivo: 'Auxiliar na gestão de negócio'
   },
   {
-    idPlano: 'plano_clinica_vet_24h',
-    nomePlano: 'Clínica Veterinária 24h & UTI Móvel',
-    setor: 'Saúde Animal & Serviços',
-    descricao: 'Atendimento emergencial 24h, internação com monitoramento contínuo e UTI móvel.',
-    cidadeUf: 'São Paulo / SP',
+    idPlano: 'weedness_cbd',
+    nomePlano: 'WeedNess',
+    setor: 'Saúde, Bem-Estar & Fitoterápicos',
+    descricao: 'Produtos fitoterápicos naturais de alta pureza, autocuidado e bem-estar integrativo.',
+    cidadeUf: 'Florianópolis / SC',
     criadoEm: new Date(Date.now() - 3600000 * 24).toISOString(),
     status: 'criado_pnbox_ddp',
     metodoCriacao: 'ddp_direct',
-    ferramentasPreenchidas: 14
+    ferramentasPreenchidas: 14,
+    categoriaObjetivo: 'Criar um novo negócio'
+  },
+  {
+    idPlano: 'chico_entrega',
+    nomePlano: 'Chico Entrega',
+    setor: 'Logística & Delivery de Bebidas',
+    descricao: 'Distribuição rápida e entrega expressa de bebidas geladas e itens de conveniência.',
+    cidadeUf: 'Belo Horizonte / MG',
+    criadoEm: new Date(Date.now() - 3600000 * 12).toISOString(),
+    status: 'criado_pnbox_ddp',
+    metodoCriacao: 'ddp_direct',
+    ferramentasPreenchidas: 14,
+    categoriaObjetivo: 'Criar um novo negócio'
   }
 ];
 
@@ -99,7 +125,10 @@ export function carregarPlanosSalvos(): PlanoCriadoInfo[] {
     if (data) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Garante que os planos oficiais da conta do usuário estão presentes
+        const idsPresentes = new Set(parsed.map((p: PlanoCriadoInfo) => p.idPlano));
+        const faltando = PLANOS_EXEMPLO_INICIAIS.filter((p) => !idsPresentes.has(p.idPlano));
+        return [...faltando, ...parsed];
       }
     }
   } catch (e) {

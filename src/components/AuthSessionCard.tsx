@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { AuthSessionState, InterceptedTrafficEvent } from '../types/pnbox';
 import { extrairIdPlano } from '../utils/planUtils';
+import { getEncryptedPnboxCredentials, saveEncryptedPnboxCredentials } from '../utils/secureStorage';
 
 interface AuthSessionCardProps {
   authSession: AuthSessionState;
@@ -54,18 +55,25 @@ export const AuthSessionCard: React.FC<AuthSessionCardProps> = ({
   const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Pré-popula CPF se disponível no banco (apenas na primeira renderização se cpf vazio)
+  // Pré-popula CPF e ID Plano do armazenamento criptografado local ou do banco
   useEffect(() => {
-    if (!authSession.cpf) {
-      fetch('/api/auth/pnbox-credentials')
-        .then(res => res.json())
-        .then(data => {
-          if (data.configured && data.data?.cpf) {
-            setCpf(data.data.cpf); // Apenas pré-popula CPF
-          }
-        });
-    }
-  }, []);
+    getEncryptedPnboxCredentials().then((saved) => {
+      if (saved) {
+        if (saved.cpf) setCpf(saved.cpf);
+        if (saved.idPlano) setIdPlano(saved.idPlano);
+        if (saved.password) setPassword(saved.password);
+      } else if (!authSession.cpf) {
+        fetch('/api/auth/pnbox-credentials')
+          .then(res => res.json())
+          .then(data => {
+            if (data.configured && data.data?.cpf) {
+              setCpf(data.data.cpf);
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }, [authSession.cpf]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,6 +81,14 @@ export const AuthSessionCard: React.FC<AuthSessionCardProps> = ({
       alert('É necessário aceitar o consentimento antes de continuar.');
       return;
     }
+
+    // Salva com criptografia AES-GCM local para não perder ao atualizar a página
+    saveEncryptedPnboxCredentials({
+      cpf,
+      idPlano,
+      password
+    });
+
     onLogin({
       cpf,
       password,

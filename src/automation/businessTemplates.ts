@@ -11,6 +11,202 @@ export interface BusinessTemplate {
 
 export const TEMPLATES_NEGOCIO: BusinessTemplate[] = [
   {
+    id: 'defesai_adeus_multas',
+    nome: 'Defesai/AdeusMultas',
+    setor: 'Legaltech & Soluções Administrativas de Trânsito',
+    descricao: 'Plataforma SaaS com IA para elaboração e gestão de recursos e defesas de multas de trânsito (NIC e pessoa física).',
+    planoId: ID_PLANO_PADRAO,
+    dados: {
+      segmentacaoMercado: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Segmentação 1',
+          detalheVisual: 'Frotistas e PMEs com multas NIC | Condutores pessoa física autuados | Motoristas de app e entregadores | Advogados de direito de trânsito',
+          variavel1: 'PMEs e empresas com frotas comerciais próprias sofrendo multas NIC',
+          variavel1Oposto: 'Empresas sem veículos próprios',
+          variavel2: 'Condutores pessoa física autuados buscando defesa técnica ágil',
+          variavel2Oposto: 'Condutores que pagam sem contestar',
+          segmento: 'B2B Frotas & B2C Motoristas'
+        }
+      ],
+      geradorPersonas: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          nome: 'Carlos Eduardo Mendes',
+          idade: '41 anos',
+          profissao: 'Gestor de Frotas / PME de Logística',
+          escolaridade: 'Superior em Administração',
+          renda: 'R$ 9.800,00',
+          habitos: 'Gerencia 25 veículos utilitários; monitora custos com combustível e multas no Excel.',
+          dores: 'Multas por Não Indicação do Condutor (NIC) que duplicam de valor gerando prejuízos severos.',
+          objetivos: 'Automatizar as indicações de condutor e ter defesas prévias fundamentadas no CTB em menos de 10 minutos.'
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          nome: 'Juliana Vasconcelos',
+          idade: '34 anos',
+          profissao: 'Motorista de Aplicativo & Autônoma',
+          escolaridade: 'Ensino Médio Completo',
+          renda: 'R$ 4.200,00',
+          habitos: 'Dirige 10h por dia em grandes centros urbanos; depende da CNH ativa para seu sustento.',
+          dores: 'Risco iminente de suspensão da CNH por acúmulo de pontos indevidos de fiscalização eletrônica falha.',
+          objetivos: 'Recorrer de autuações com embasamento jurídico rápido e preço justo sem burocracia de despachante.'
+        }
+      ],
+      jornadaCliente: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          etapa: 'Notificação da Autuação',
+          acoes: 'Recebe notificação de penalidade no app da Carteira Digital ou carta do Detran.',
+          pontosContato: 'Google Search ("como recorrer multa de velocidade"), Instagram, WhatsApp.',
+          emocoes: 'Frustração, senso de injustiça e urgência antes do prazo fatal.',
+          oportunidadesMelhoria: 'Calculadora gratuita de risco de suspensão da CNH na landing page.'
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          etapa: 'Geração do Recurso com IA',
+          acoes: 'Faz upload da foto da notificação ou digita o auto; IA analisa inconsistências do auto e gera a minuta.',
+          pontosContato: 'Plataforma web Defesai, WhatsApp bot com OCR.',
+          emocoes: 'Alívio ao receber um recurso técnico completo com artigos do CTB e jurisprudência.',
+          oportunidadesMelhoria: 'Protocolo digital automatizado junto ao órgão autuador via integração Gov.br.'
+        }
+      ],
+      propostaValor: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          tarefasCliente: 'Anular multas indevidas e evitar acúmulo de pontos na CNH e multas NIC milionárias.',
+          dores: 'Despachantes caros e lentos, modelos genéricos da internet que são indeferidos sumariamente.',
+          ganhos: 'Economia financeira, preservação do direito de dirigir e tranquilidade para trabalhar.',
+          produtosServicos: 'SaaS com IA especializada em Código de Trânsito Brasileiro + Painel de Gestão de Frotas.',
+          aliviadoresDores: 'Recursos gerados em 2 minutos com teses jurídicas personalizadas e jurisprudência atualizada.',
+          criadoresGanhos: 'Redução de até 80% nos custos de multas corporativas com alertas preditivos de prazos.'
+        }
+      ],
+      analiseConcorrencia: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          nomeConcorrente: 'Despachantes Tradicionais',
+          pontosFortes: 'Atendimento presencial e proximidade física com órgãos de trânsito.',
+          pontosFracos: 'Valores abusivos (R$ 300+ por recurso), lentidão e processos manuais.',
+          preco: 'Alto',
+          diferencial: 'Preço 5x mais acessível, geração instantânea com IA e suporte 24/7 online.'
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          nomeConcorrente: 'Sites de Modelos Prontos Word/PDF',
+          pontosFortes: 'Preço muito baixo ou gratuito.',
+          pontosFracos: 'Textos genéricos e desatualizados, quase 100% de indeferimento no JARI.',
+          preco: 'Baixo',
+          diferencial: 'Argumentação técnica customizada que aponta vícios formais reais do auto de infração.'
+        }
+      ],
+      forcasFraquezas: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          tipo: 'forca',
+          descricao: 'Algoritmo proprietário de análise de consistência de autos de infração com IA generativa.',
+          grauImportancia: 'Alta'
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          tipo: 'forca',
+          descricao: 'Parcerias com associações de motoristas de aplicativo e locadoras de veículos.',
+          grauImportancia: 'Alta'
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          tipo: 'fraqueza',
+          descricao: 'Necessidade de constante atualização regulatória perante resoluções do CONTRAN.',
+          grauImportancia: 'Média'
+        }
+      ],
+      oportunidadesAmeacas: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          tipo: 'oportunidade',
+          descricao: 'Expansão de radares inteligentes e sistemas automáticos de fiscalização em todo o território nacional.',
+          impacto: 'Alto'
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          tipo: 'ameaca',
+          descricao: 'Digitalização de processos pelos Detrans dificultando integrações não oficiais.',
+          impacto: 'Médio'
+        }
+      ],
+      analiseSwot: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          estrategiaDesenvolvimento: 'Acelerar integrações com sistemas de gestão de frotas para capturar clientes B2B recorrentes.',
+          estrategiaManutencao: 'Manter assessoria jurídica especializada para homologar novas teses de defesa em conformidade com o CTB.',
+          estrategiaSobrevivencia: 'Oferecer garantias ou créditos para recursos julgados improcedentes na primeira instância.'
+        }
+      ],
+      investimentoFixo: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Servidores em Nuvem, Workstations de Desenvolvimento e Infraestrutura de Segurança',
+          quantidade: 1,
+          valorUnitario: 22000,
+          subtotal: 22000
+        }
+      ],
+      investimentoPreOperacional: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Desenvolvimento do MVP, Registro de Marca no INPI e Assessoria Jurídica Regulatória',
+          valor: 18000
+        }
+      ],
+      custoFixo: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Infraestrutura Cloud (APIs Gemini, AWS, Vercel) e Ferramentas SaaS',
+          valor: 3200
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Equipe de Suporte e Monitoramento Jurídico',
+          valor: 7500
+        }
+      ],
+      produtoServico: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Recurso Individual com IA (Pessoa Física)',
+          precoVenda: 49.90,
+          custoUnitario: 4.50,
+          estimativaVendasMes: 350
+        },
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Plano Assinatura Gestão de Frota PME (Até 30 veículos)',
+          precoVenda: 490.00,
+          custoUnitario: 35.00,
+          estimativaVendasMes: 45
+        }
+      ],
+      quadroExperimentacao: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          descricao: 'Motoristas autuados preferem preencher dados via WhatsApp do que instalar um novo aplicativo.',
+          categoria: 'Cliente',
+          nivelIncerteza: 'Médio',
+          nivelImportancia: 'Alta'
+        }
+      ],
+      funilVendas: [
+        {
+          idPlano: ID_PLANO_PADRAO,
+          nome: 'Google Search "Recurso Multa NIC"',
+          orcamento: 1500,
+          qtdPessoasAlcancadas: 8500,
+          qtdPessoasChamadas: 920
+        }
+      ]
+    }
+  },
+  {
     id: 'cafeteria_coworking',
     nome: 'Cafeteria Especial & Coworking Híbrido',
     setor: 'Alimentos & Bebidas / Serviços',
