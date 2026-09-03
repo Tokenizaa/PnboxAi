@@ -6,7 +6,7 @@ import React, {
   useEffect,
   ReactNode,
 } from 'react';
-import { ResearchReport, ResearchTask, ResearchGap, Contradiction, CanonicalBusinessModel } from '../../research/types';
+import { ResearchReport, ResearchTask, ResearchGap, Contradiction, CanonicalBusinessModel } from '../research/types';
 import { apiCall } from '../utils/authFetch';
 
 interface ResearchState {

@@ -3,7 +3,6 @@ import { chromium } from 'playwright';
 
 (async () => {
   const browser = await chromium.launch({
-    executablePath: '/home/lg/workspace/projects/AdeusMultas-Defesa-/PnboxAi/.playwright-browsers/chromium_headless_shell-1155/chrome-linux/headless_shell',
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
     headless: true,
   });

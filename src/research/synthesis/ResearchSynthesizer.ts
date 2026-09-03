@@ -483,12 +483,15 @@ export class ResearchSynthesizer {
     return demo;
   }
 
-  private extractList(claim: Claim, fieldName: string): string[] {
+  private extractList(claim: Claim, fieldNames: string | string[]): string[] {
     const text = claim.statement;
-    const pattern = new RegExp(`${fieldName}[s]?[:\\s]+([^.;]+)`, "i");
-    const match = text.match(pattern);
-    if (match) {
-      return match[1].split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    const names = Array.isArray(fieldNames) ? fieldNames : [fieldNames];
+    for (const fieldName of names) {
+      const pattern = new RegExp(`${fieldName}[s]?[:\\s]+([^.;]+)`, "i");
+      const match = text.match(pattern);
+      if (match) {
+        return match[1].split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+      }
     }
     return [];
   }

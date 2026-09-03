@@ -118,6 +118,8 @@ export class SchemaGenerator {
       nome: 'Cliente Típico',
       idade: '30 a 45 anos',
       perfil: 'Consumidor exigente',
+      dores: ['Falta de opções especializadas na região.'],
+      desejos: ['Atendimento rápido e personalizado.'],
       ticketMedio: 150
     };
     const fin = research.investimentoEstimado || {
@@ -307,7 +309,7 @@ export class SchemaGenerator {
       const val = payload[campo.nome];
       if (campo.obrigatorio) {
         if (val === undefined || val === null || val === '') {
-          erros.push(`Campo obrigatório ausente ou vazio: "${campo.nome}" (${campo.label})`);
+          erros.push(`Campo obrigatório ausente ou vazio: "${campo.nome}" (${campo.descricao})`);
         }
       }
 

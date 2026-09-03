@@ -283,7 +283,8 @@ export class PnboxAdapter {
   }
 
   private validate(collections: Record<string, Record<string, unknown>[]>): AdapterResult["validation"] {
-    const detailsByCollection: AdapterResult["validation"]["detailsByCollection"] = {};
+    const detailsByCollection: NonNullable<AdapterResult["validation"]["detailsByCollection"]> = {};
+    const detailsByTool: AdapterResult["validation"]["detailsByTool"] = {};
     let totalErrors = 0;
     let totalWarnings = 0;
 
@@ -306,10 +307,21 @@ export class PnboxAdapter {
         });
       }
 
+      const status = errors.length === 0 ? (items.length === 0 ? "missing" : "valid") : "error";
+
       detailsByCollection[ferramenta.collectionName] = {
         ferramentaId: ferramenta.id,
         collectionName: ferramenta.collectionName,
-        status: errors.length === 0 ? (items.length === 0 ? "missing" : "valid") : "error",
+        status,
+        itemsValidated: items.length,
+        errors,
+        warnings,
+      };
+
+      detailsByTool[ferramenta.id] = {
+        ferramentaId: ferramenta.id,
+        collectionName: ferramenta.collectionName,
+        status,
         itemsValidated: items.length,
         errors,
         warnings,
@@ -320,6 +332,7 @@ export class PnboxAdapter {
       valid: totalErrors === 0,
       totalErrors,
       totalWarnings,
+      detailsByTool,
       detailsByCollection,
     };
   }

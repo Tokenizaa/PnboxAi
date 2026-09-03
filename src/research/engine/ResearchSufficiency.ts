@@ -119,7 +119,10 @@ export class ResearchSufficiencyAnalyzer {
   }
 
   private inferCategoryFromGap(gap: ResearchGap): ResearchCategory | null {
-    if (gap.questionId && Object.keys(summary).includes(gap.questionId)) {
+    const validCategories: ResearchCategory[] = [
+      "market", "customer", "competition", "pricing", "operations", "financial", "regulatory", "strategy"
+    ];
+    if (gap.questionId && (validCategories as string[]).includes(gap.questionId)) {
       return gap.questionId as ResearchCategory;
     }
 

@@ -115,7 +115,7 @@ export function isForbiddenFinancialRatio(field: string, value: number): boolean
 }
 
 export function isFinancialFieldRequiringSource(field: string): boolean {
-  return RESEARCH_POLICIES.financials.requireSourceFor.includes(field);
+  return (RESEARCH_POLICIES.financials.requireSourceFor as readonly string[]).includes(field);
 }
 
 export function calculateSufficiency(
@@ -188,9 +188,9 @@ export function validateClaimOrigin(
 
   if (RESEARCH_POLICIES.claims.neverInventFinancials && isFinancialFieldRequiringSource(fieldName)) {
     if (claim.origin === "ESTIMATED" || claim.origin === "INFERRED") {
-      if (!claim.sourceIds || claim.sourceIds.length === 0) {
+      if (!claim.evidenceIds || claim.evidenceIds.length === 0) {
         errors.push(
-          `Campo financeiro "${fieldName}" requer origem DIRECT_SOURCE ou CALCULATED com sources, mas tem origem ${claim.origin} sem fontes`
+          `Campo financeiro "${fieldName}" requer origem DIRECT_SOURCE ou CALCULATED com fontes/evidências, mas tem origem ${claim.origin} sem fontes`
         );
       }
     }

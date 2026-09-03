@@ -103,7 +103,16 @@ export class TaskOrchestrator {
       newClaims,
       gapsFound: [],
       contradictionsFound: [],
-      sufficiencyScore: {},
+      sufficiencyScore: {
+        market: 0,
+        customer: 0,
+        competition: 0,
+        pricing: 0,
+        operations: 0,
+        financial: 0,
+        regulatory: 0,
+        strategy: 0,
+      },
       startedAt: iterationStart,
       completedAt: iterationEnd,
     };

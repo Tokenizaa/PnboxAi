@@ -110,7 +110,10 @@ export function obterStatusSessaoAtualizada(): AuthSessionState {
   const sessao = obterSessaoAtual();
 
   if (!sessao) {
-    globalAuthState.status = 'idle';
+    // Preservar 'failed' se houver falha recente
+    if (globalAuthState.status !== 'failed' && globalAuthState.status !== 'authenticating') {
+      globalAuthState.status = 'idle';
+    }
     globalAuthState.isExpired = false;
     globalAuthState.tempoRestanteMinutos = 0;
     globalAuthState.meteorLoginToken = undefined;
@@ -149,6 +152,9 @@ export function simularExpiracaoSessao(): AuthSessionState {
   globalAuthState.status = 'expired';
   globalAuthState.isExpired = true;
   globalAuthState.tempoRestanteMinutos = 0;
+  globalAuthState.meteorLoginToken = undefined;
+  globalAuthState.meteorUserId = undefined;
+  globalAuthState.isOnline = false;
   addAuthLog(
     'Sessão encerrada manualmente pelo usuário — necessário novo login.',
     'warn'
@@ -157,14 +163,16 @@ export function simularExpiracaoSessao(): AuthSessionState {
 }
 
 /**
- * Autentica o usuário no PNBOX via fluxo OIDC real (Keycloak AMEI).
+ * Autentica o usuário no PNBOX via fluxo OIDC (Keycloak AMEI no modo LIVE, ou simulação segura em DRY_RUN).
  *
  * @param credentials CPF + senha fornecidos pelo próprio usuário na UI
  * @param consentimentoAceito TRUE se o usuário marcou o checkbox de consentimento
+ * @param modoExecucao 'DRY_RUN' ou 'LIVE'
  */
 export async function iniciarSessaoPlaywright(
   credentials: Credentials,
-  consentimentoAceito: boolean = false
+  consentimentoAceito: boolean = false,
+  modoExecucao: 'DRY_RUN' | 'LIVE' = 'DRY_RUN'
 ): Promise<AuthSessionState> {
   if (!consentimentoAceito) {
     globalAuthState.status = 'failed';
@@ -178,18 +186,60 @@ export async function iniciarSessaoPlaywright(
   globalAuthState.status = 'authenticating';
   globalAuthState.cpf = credentials.cpf;
   globalAuthState.idPlano = credentials.idPlano;
+  globalAuthState.modoExecucao = modoExecucao;
 
-  // Sanitizar CPF no log (apenas primeiros 3 dígitos)
   const cpfMascarado = credentials.cpf
     ? credentials.cpf.substring(0, 3) + '.***.***-' + credentials.cpf.slice(-2)
     : '(vazio)';
-  addAuthLog(`Iniciando autenticação OIDC para CPF ${cpfMascarado}...`, 'info');
+
+  // MODO DRY_RUN: Simulação segura do ambiente Sebrae PNBOX sem necessidade de conexão remota ao vivo
+  if (modoExecucao === 'DRY_RUN') {
+    addAuthLog(`[DRY_RUN] Inicializando sessão de simulação segura para CPF ${cpfMascarado}...`, 'info');
+    const agora = Date.now();
+    const expiraEmMs = agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000;
+    const cpfDigits = credentials.cpf.replace(/\D/g, '') || '515178';
+    const mockToken = 'sim_dryrun_' + Buffer.from(`${credentials.cpf}:${agora}`).toString('base64').substring(0, 24);
+    const mockUserId = `usr_sebrae_${cpfDigits.slice(0, 6)}`;
+
+    sessaoAtual = {
+      cookiesPnbox: `meteor_login_token=${mockToken}; x_mtok=${mockToken}; meteor_user_id=${mockUserId}`,
+      idToken: mockToken,
+      accessToken: mockToken,
+      refreshToken: undefined,
+      meteorSessionId: 'ddp_dryrun_' + Math.random().toString(36).substring(2, 9),
+      meteorUserId: mockUserId,
+      cpf: credentials.cpf,
+      idPlano: credentials.idPlano,
+      autenticadoEm: new Date(agora).toISOString(),
+      expiraEm: new Date(expiraEmMs).toISOString()
+    };
+
+    globalAuthState.status = 'authenticated';
+    globalAuthState.autenticadoEm = sessaoAtual.autenticadoEm;
+    globalAuthState.expiresAt = sessaoAtual.expiraEm;
+    globalAuthState.isExpired = false;
+    globalAuthState.tempoRestanteMinutos = TEMPO_VIDA_SESSAO_MINUTOS;
+    globalAuthState.isOnline = true;
+    globalAuthState.meteorLoginToken = mockToken;
+    globalAuthState.meteorUserId = mockUserId;
+    globalAuthState.cookiesCount = 3;
+    globalAuthState.ultimoPing = new Date(agora).toISOString();
+
+    addAuthLog(
+      `Sessão DRY_RUN inicializada com sucesso. Conexão simulada DDP ativa para o plano ${credentials.idPlano}.`,
+      'success'
+    );
+
+    return obterStatusSessaoAtualizada();
+  }
+
+  // MODO LIVE: Autenticação real via navegador Playwright headless no Sebrae ID oficial
+  addAuthLog(`[LIVE] Iniciando autenticação OIDC oficial no Sebrae ID para CPF ${cpfMascarado}...`, 'info');
 
   try {
     const result = await pnboxOidcLoginViaPlaywright(credentials.cpf, credentials.password);
 
     const agora = Date.now();
-    // Preferir TTL do token Meteor sobre nosso TTL interno de 50min
     const expiraEmMs = result.expiresAt || (agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000);
 
     sessaoAtual = {
@@ -197,7 +247,7 @@ export async function iniciarSessaoPlaywright(
       idToken: result.idToken,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
-      meteorSessionId: undefined, // Será preenchido na primeira conexão DDP
+      meteorSessionId: undefined, // Preenchido na conexão DDP
       meteorUserId: (result as any).meteorUserId,
       cpf: credentials.cpf,
       idPlano: credentials.idPlano,
@@ -214,13 +264,14 @@ export async function iniciarSessaoPlaywright(
     globalAuthState.ultimoPing = new Date(agora).toISOString();
 
     addAuthLog(
-      `Autenticação OIDC concluída. ${result.pnboxCookies ? 'Cookies PNBOX' : 'Sem cookies'} prontos para DDP.`,
+      `Autenticação OIDC LIVE concluída com sucesso. Tokens Sebrae prontos para DDP.`,
       'success'
     );
 
     return obterStatusSessaoAtualizada();
   } catch (err: any) {
     globalAuthState.status = 'failed';
+    globalAuthState.isOnline = false;
     addAuthLog(`Falha na autenticação OIDC: ${err.message}`, 'error');
     return globalAuthState;
   }

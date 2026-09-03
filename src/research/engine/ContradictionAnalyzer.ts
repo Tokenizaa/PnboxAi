@@ -17,7 +17,7 @@ export class ContradictionAnalyzer {
     const contradictions: Contradiction[] = [];
     const groupedClaims = this.groupComparableClaims(claims);
 
-    for (const [key, claimList] of Object.entries(groupedClaims)) {
+    for (const [key, claimList] of groupedClaims.entries()) {
       if (claimList.length < 2) continue;
 
       const pairs = this.getPairs(claimList);

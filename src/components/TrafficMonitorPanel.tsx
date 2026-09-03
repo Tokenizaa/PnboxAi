@@ -222,7 +222,7 @@ export const TrafficMonitorPanel: React.FC<TrafficMonitorPanelProps> = ({
                 <button
                   onClick={() => {
                     const payload =
-                      eventoSelecionado.payloadEnviado?.params?.[0] || eventoSelecionado.payloadEnviado;
+                      (eventoSelecionado.payloadEnviado as any)?.params?.[0] || eventoSelecionado.payloadEnviado;
                     onSendToValidator(payload, eventoSelecionado.operacaoDetectada?.ferramentaId);
                   }}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-md shadow-indigo-600/30 whitespace-nowrap cursor-pointer"

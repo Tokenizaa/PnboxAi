@@ -19,7 +19,7 @@ import {
 } from './types/pnbox';
 import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from './automation/schemaCatalog';
 import { TEMPLATES_NEGOCIO, BusinessTemplate } from './automation/businessTemplates';
-import { salvarPlanoNoHistorico } from './utils/planUtils';
+import { salvarPlanoNoHistorico, extrairIdPlano } from './utils/planUtils';
 import { Building2, Edit3, ExternalLink, Plus, Sparkles, CheckCircle2 } from 'lucide-react';
 import { getPlatformSession } from './components/PlatformGate';
 
@@ -117,7 +117,8 @@ try {
 // Toast system for notifications
 
 
-const handleUpdateActivePlanId = (novoId: string) => {
+const handleUpdateActivePlanId = (entrada: string) => {
+    const novoId = extrairIdPlano(entrada) || ID_PLANO_PADRAO;
     setAuthSession((prev) => ({
       ...prev,
       idPlano: novoId,
@@ -221,40 +222,50 @@ const handleUpdateActivePlanId = (novoId: string) => {
   const handleLogin = async (cred: { cpf: string; password: string; idPlano: string; consentimentoAceito: boolean; modoExecucao: 'DRY_RUN' | 'LIVE' }) => {
     setIsLoadingAuth(true);
     try {
+      const planoNormalizado = extrairIdPlano(cred.idPlano || '') || authSession.idPlano || ID_PLANO_PADRAO;
       const res = await fetch('/api/automation/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cred)
+        body: JSON.stringify({
+          ...cred,
+          idPlano: planoNormalizado
+        })
       });
       const data = await res.json();
-      if (!res.ok) {
+      
+      if (!res.ok || data.status !== 'ok' || data.session?.status !== 'authenticated') {
+        const errorMsg = data.mensagem || data.session?.ultimoLog || 'Não foi possível conectar com as credenciais informadas.';
+        if (data.session) {
+          setAuthSession(data.session);
+        }
         pushToast({
           level: 'error',
-          title: 'Falha no login',
-          message: data.mensagem || `HTTP ${res.status}`,
-          duration: 6000,
+          title: 'Falha na Autenticação PNBOX',
+          message: errorMsg,
+          duration: 7000,
           icon: 'error'
         });
         return;
       }
+
       if (data.session) {
         setAuthSession(data.session);
         const isLive = cred.modoExecucao === 'LIVE';
         // Se logou na plataforma (Supabase) e a conexão PNBOX autenticou
         // com consentimento, persiste as credenciais PNBOX no BANCO.
-        if (data.session.status === 'authenticated' && cred.consentimentoAceito) {
+        if (cred.consentimentoAceito) {
           persistirCredenciaisNoBanco({
             cpf: cred.cpf,
             password: cred.password,
-            idPlano: cred.idPlano || ID_PLANO_PADRAO,
+            idPlano: planoNormalizado,
           });
         }
         pushToast({
           level: isLive ? 'warn' : 'success',
-          title: isLive ? 'Login LIVE concluído' : 'Login DRY_RUN concluído',
+          title: isLive ? 'Sessão Oficial LIVE Conectada' : 'Sessão DRY_RUN Conectada',
           message: isLive
-            ? `Sessão autenticada no PNBOX real. Preenchimentos serão gravados no servidor.`
-            : `Sessão autenticada (simulação). Preenchimentos não tocam o servidor real.`,
+            ? `Sessão autenticada no PNBOX real via Sebrae ID. Preenchimentos serão gravados no servidor.`
+            : `Sessão autenticada (simulação segura). Preenchimentos e validações prontos.`,
           duration: 5000,
           icon: isLive ? 'warn' : 'check'
         });
@@ -269,7 +280,7 @@ const handleUpdateActivePlanId = (novoId: string) => {
       pushToast({
         level: 'error',
         title: 'Erro na autenticação',
-        message: err?.message || 'Falha desconhecida',
+        message: err?.message || 'Falha desconhecida de comunicação com o servidor.',
         duration: 6000,
         icon: 'error'
       });

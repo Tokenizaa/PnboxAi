@@ -36,28 +36,49 @@ export const PLANOS_EXEMPLO_INICIAIS: PlanoCriadoInfo[] = [
  * Ex: "abc123xyz" -> "abc123xyz"
  */
 export function extrairIdPlano(entrada: string): string {
-  if (!entrada) return '';
+  if (!entrada) return ID_PLANO_PADRAO_SISTEMA;
   const trimmed = entrada.trim();
 
-  // Caso seja URL do PNBOX
-  const urlMatch = trimmed.match(/pnbox\.sebrae\.com\.br\/planoNegocio\/ferramentas\/([a-zA-Z0-9_-]+)/i);
+  // Caso seja apenas o domínio base do PNBOX sem ID especificado
+  if (/^https?:\/\/pnbox\.sebrae\.com\.br\/?$/i.test(trimmed) || trimmed === 'https://pnbox.sebrae.com.br') {
+    return ID_PLANO_PADRAO_SISTEMA;
+  }
+
+  // Caso seja URL do PNBOX com ferramentas
+  const urlMatch = trimmed.match(/pnbox\.sebrae\.com\.br\/(?:planoNegocio\/)?ferramentas\/([a-zA-Z0-9_-]+)/i);
   if (urlMatch && urlMatch[1]) {
     return urlMatch[1];
   }
 
-  // Caso contenha barras ou query params
-  const cleanId = trimmed.replace(/^https?:\/\/[^/]+\//, '').replace(/\?.*$/, '').replace(/#.*$/, '');
-  const parts = cleanId.split('/').filter(Boolean);
-  
-  if (parts.length > 0) {
-    const ferramentasIndex = parts.indexOf('ferramentas');
-    if (ferramentasIndex !== -1 && parts[ferramentasIndex + 1]) {
-      return parts[ferramentasIndex + 1];
-    }
-    return parts[parts.length - 1];
+  // Caso contenha URL com planoNegocio/{id} ou plano/{id}
+  const planoMatch = trimmed.match(/pnbox\.sebrae\.com\.br\/(?:planoNegocio|plano)\/([a-zA-Z0-9_-]+)/i);
+  if (planoMatch && planoMatch[1] && planoMatch[1] !== 'ferramentas') {
+    return planoMatch[1];
   }
 
-  return trimmed;
+  // Se for uma URL genérica, extrai último segmento válido
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const parsedUrl = new URL(trimmed);
+      const segments = parsedUrl.pathname.split('/').filter(Boolean);
+      if (segments.length === 0) {
+        return ID_PLANO_PADRAO_SISTEMA;
+      }
+      const fIdx = segments.indexOf('ferramentas');
+      if (fIdx !== -1 && segments[fIdx + 1]) {
+        return segments[fIdx + 1];
+      }
+      const lastSeg = segments[segments.length - 1];
+      if (/^[a-zA-Z0-9_-]{3,60}$/.test(lastSeg)) {
+        return lastSeg;
+      }
+      return ID_PLANO_PADRAO_SISTEMA;
+    } catch {
+      return ID_PLANO_PADRAO_SISTEMA;
+    }
+  }
+
+  return trimmed || ID_PLANO_PADRAO_SISTEMA;
 }
 
 /**

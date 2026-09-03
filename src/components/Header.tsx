@@ -130,7 +130,9 @@ export const Header: React.FC<HeaderProps> = ({
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
                     </span>
                     <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="font-semibold">PNBOX Online</span>
+                    <span className="font-semibold">
+                      {authSession.modoExecucao === 'LIVE' ? 'PNBOX LIVE Conectado' : 'PNBOX Simulação Conectada'}
+                    </span>
                     {authSession.tempoRestanteMinutos !== undefined && (
                       <span className="text-[10px] text-emerald-400/80 font-mono hidden sm:inline">
                         ({authSession.tempoRestanteMinutos}m)
@@ -184,9 +186,15 @@ export const Header: React.FC<HeaderProps> = ({
                       <span className="text-slate-200">wss://pnbox.sebrae.com.br</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-slate-400">Modo de Operação:</span>
+                      <span className={authSession.modoExecucao === 'LIVE' ? 'text-amber-400 font-bold' : 'text-indigo-400'}>
+                        {authSession.modoExecucao === 'LIVE' ? 'Oficial (LIVE Sebrae)' : 'Simulação Segura (DRY_RUN)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-slate-400">Sessão DDP:</span>
-                      <span className={isAuthenticated ? 'text-emerald-400' : 'text-amber-400'}>
-                        {isAuthenticated ? 'Ativa & Autenticada' : isExpired ? 'Expirada' : 'Não Inicializada'}
+                      <span className={isAuthenticated ? 'text-emerald-400 font-medium' : isExpired ? 'text-amber-400' : 'text-slate-400'}>
+                        {isAuthenticated ? 'Ativa & Autenticada' : isExpired ? 'Expirada' : 'Aguardando Inicialização'}
                       </span>
                     </div>
                     {authSession.autenticadoEm && (
@@ -199,10 +207,18 @@ export const Header: React.FC<HeaderProps> = ({
                     )}
                     <div className="flex justify-between">
                       <span className="text-slate-400">Validade Restante:</span>
-                      <span className={isAuthenticated ? 'text-emerald-400' : 'text-rose-400'}>
-                        {isAuthenticated ? `${authSession.tempoRestanteMinutos ?? 60} min` : 'Expirada'}
+                      <span className={isAuthenticated ? 'text-emerald-400 font-semibold' : isExpired ? 'text-amber-400' : 'text-slate-400'}>
+                        {isAuthenticated ? `${authSession.tempoRestanteMinutos ?? 50} min` : isExpired ? 'Expirada' : 'Não iniciada'}
                       </span>
                     </div>
+                    {isAuthenticated && authSession.meteorUserId && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">User ID Sebrae:</span>
+                        <span className="text-indigo-300 font-mono text-[10px]">
+                          {authSession.meteorUserId}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-2 border-t border-slate-800 flex flex-col gap-2">

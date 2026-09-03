@@ -29,6 +29,7 @@ import { SchemaGenerator } from './src/utils/schemaGenerator';
 import { PlanAuditManager } from './src/utils/auditUtils';
 import { PlanoCriadoInfo } from './src/types/pnbox';
 import { ResearchEngine } from './src/research';
+import { extrairIdPlano } from './src/utils/planUtils';
 
 // Armazenamento em memória de planos criados via IA / Deep Research / DDP
 const PLANOS_CRIADOS: PlanoCriadoInfo[] = [
@@ -45,30 +46,82 @@ const PLANOS_CRIADOS: PlanoCriadoInfo[] = [
   }
 ];
 
-// ===== AUTHENTICATION SYSTEM (Supabase Auth) =====
-// Login/registro agora usam Supabase Auth (auth.users). Tokens JWT são emitidos
-// pelo próprio Supabase. Dados ficam no banco, não em memória do servidor.
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.warn('[Auth] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY não configurados. Auth inoperante.');
+// ===== AUTHENTICATION SYSTEM (Supabase Auth with local memory fallback) =====
+const SUPABASE_URL = process.env.SUPABASE_URL?.trim() || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
+
+const isSupabaseConfigured = Boolean(
+  SUPABASE_URL &&
+  SUPABASE_SERVICE_ROLE_KEY &&
+  (SUPABASE_URL.startsWith('http://') || SUPABASE_URL.startsWith('https://'))
+);
+
+if (!isSupabaseConfigured) {
+  console.warn('[Auth] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY não configurados ou inválidos. Utilizando modo fallback em memória.');
 }
 
-// Client admin (service role): cria usuários, valida JWTs, acessa tabelas.
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+// Client admin (service role): cria usuários, valida JWTs, acessa tabelas se configurado
+const supabase = isSupabaseConfigured
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : null;
 
-// Middleware de autenticação — valida o access token JWT do Supabase.
+// Armazenamento em memória local caso Supabase não esteja provisionado no ambiente
+interface LocalUserAccount {
+  id: string;
+  email: string;
+  name: string;
+  passwordHash: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const LOCAL_USERS: Map<string, LocalUserAccount> = new Map();
+const LOCAL_CREDENTIALS: Map<string, { cpf: string; password: string; idPlano: string; updatedAt: string }> = new Map();
+
+function createLocalToken(userId: string, email: string): string {
+  const payload = Buffer.from(JSON.stringify({ userId, email, exp: Date.now() + 86400000 })).toString('base64');
+  return `local_token_${userId}_${payload}`;
+}
+
+function verifyLocalToken(token: string): { id: string; email: string; name: string } | null {
+  if (!token.startsWith('local_token_')) return null;
+  try {
+    const parts = token.split('_');
+    const payloadPart = parts.slice(3).join('_');
+    const data = JSON.parse(Buffer.from(payloadPart, 'base64').toString('utf8'));
+    if (data.exp && data.exp < Date.now()) return null;
+    const user = LOCAL_USERS.get(data.userId);
+    if (user) {
+      return { id: user.id, email: user.email, name: user.name };
+    }
+    return { id: data.userId, email: data.email, name: (data.email || 'usuário').split('@')[0] };
+  } catch {
+    return null;
+  }
+}
+
+// Middleware de autenticação — valida o access token JWT do Supabase ou token local
 function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     return res.status(401).json({ status: 'error', message: 'Token de acesso não fornecido' });
   }
   const token = authHeader.substring(7);
+
+  if (!supabase || token.startsWith('local_token_')) {
+    const localUser = verifyLocalToken(token);
+    if (!localUser) {
+      return res.status(401).json({ status: 'error', message: 'Token local inválido ou expirado' });
+    }
+    (req as any).user = localUser;
+    return next();
+  }
+
   supabase.auth.getUser(token)
     .then(({ data, error }) => {
       if (error || !data.user) {
@@ -90,7 +143,16 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
 function optionalAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
-    supabase.auth.getUser(authHeader.substring(7))
+    const token = authHeader.substring(7);
+    if (!supabase || token.startsWith('local_token_')) {
+      const localUser = verifyLocalToken(token);
+      if (localUser) {
+        (req as any).user = localUser;
+      }
+      return next();
+    }
+
+    supabase.auth.getUser(token)
       .then(({ data }) => {
         if (data.user) {
           (req as any).user = {
@@ -169,6 +231,34 @@ async function startServer() {
 
     const normalizedEmail = email.toLowerCase().trim();
 
+    if (!supabase) {
+      for (const u of LOCAL_USERS.values()) {
+        if (u.email === normalizedEmail) {
+          return res.status(409).json({ status: 'error', message: 'Email já cadastrado' });
+        }
+      }
+      const userId = 'usr_' + Math.random().toString(36).substring(2, 11);
+      const now = new Date().toISOString();
+      const localUser: LocalUserAccount = {
+        id: userId,
+        email: normalizedEmail,
+        name: name.trim(),
+        passwordHash: password,
+        createdAt: now,
+        updatedAt: now,
+      };
+      LOCAL_USERS.set(userId, localUser);
+      const accessToken = createLocalToken(userId, normalizedEmail);
+      const refreshToken = 'refresh_' + accessToken;
+      return res.status(201).json({
+        status: 'ok',
+        user: { id: userId, email: normalizedEmail, name: name.trim() },
+        accessToken,
+        refreshToken,
+        expiresIn: 86400,
+      });
+    }
+
     // Cria o usuário no Supabase Auth
     const { data: created, error: createError } = await supabase.auth.admin.createUser({
       email: normalizedEmail,
@@ -223,8 +313,36 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Email e senha são obrigatórios' });
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+
+    if (!supabase) {
+      let matchedUser: LocalUserAccount | null = null;
+      for (const u of LOCAL_USERS.values()) {
+        if (u.email === normalizedEmail && u.passwordHash === password) {
+          matchedUser = u;
+          break;
+        }
+      }
+      if (!matchedUser) {
+        return res.status(401).json({ status: 'error', message: 'Credenciais inválidas' });
+      }
+      const accessToken = createLocalToken(matchedUser.id, matchedUser.email);
+      const refreshToken = 'refresh_' + accessToken;
+      return res.json({
+        status: 'ok',
+        user: {
+          id: matchedUser.id,
+          email: matchedUser.email,
+          name: matchedUser.name,
+        },
+        accessToken,
+        refreshToken,
+        expiresIn: 86400,
+      });
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.toLowerCase().trim(),
+      email: normalizedEmail,
       password,
     });
     if (error || !data.session) {
@@ -251,6 +369,24 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Refresh token é obrigatório' });
     }
 
+    if (!supabase) {
+      if (typeof refreshToken === 'string' && refreshToken.startsWith('refresh_local_token_')) {
+        const token = refreshToken.substring(8);
+        const localUser = verifyLocalToken(token);
+        if (!localUser) {
+          return res.status(401).json({ status: 'error', message: 'Refresh token inválido ou expirado' });
+        }
+        const newAccess = createLocalToken(localUser.id, localUser.email);
+        return res.json({
+          status: 'ok',
+          accessToken: newAccess,
+          refreshToken: 'refresh_' + newAccess,
+          expiresIn: 86400,
+        });
+      }
+      return res.status(401).json({ status: 'error', message: 'Refresh token inválido' });
+    }
+
     const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
     if (error || !data.session) {
       return res.status(401).json({ status: 'error', message: 'Refresh token inválido ou expirado' });
@@ -272,6 +408,20 @@ async function startServer() {
 
   app.get('/api/auth/me', authMiddleware, async (req, res) => {
     const user = (req as any).user;
+    if (!supabase) {
+      const localUser = LOCAL_USERS.get(user.id);
+      return res.json({
+        status: 'ok',
+        user: {
+          id: user.id,
+          email: user.email,
+          name: localUser?.name || user.name,
+          createdAt: localUser?.createdAt || new Date().toISOString(),
+          updatedAt: localUser?.updatedAt || new Date().toISOString(),
+        },
+      });
+    }
+
     // busca perfil criado (criadoAt/atualizadoAt vêm do banco)
     const { data: profile } = await supabase
       .from('profiles')
@@ -294,6 +444,18 @@ async function startServer() {
   // GET /api/auth/pnbox-credentials - retorna config (NUNCA a senha)
   app.get('/api/auth/pnbox-credentials', authMiddleware, async (req, res) => {
     const userId = (req as any).user.id;
+    if (!supabase) {
+      const cred = LOCAL_CREDENTIALS.get(userId);
+      if (!cred) {
+        return res.json({ status: 'ok', configured: false, data: null });
+      }
+      return res.json({
+        status: 'ok',
+        configured: true,
+        data: { cpf: cred.cpf, idPlano: cred.idPlano, updatedAt: cred.updatedAt },
+      });
+    }
+
     const { data } = await supabase
       .from('pnbox_credentials')
       .select('cpf, id_plano, updated_at')
@@ -319,6 +481,17 @@ async function startServer() {
     if (typeof password !== 'string' || !password) {
       return res.status(400).json({ status: 'error', message: 'Senha é obrigatória' });
     }
+
+    if (!supabase) {
+      LOCAL_CREDENTIALS.set(userId, {
+        cpf: cpf.trim(),
+        password,
+        idPlano: idPlano?.trim?.() || '',
+        updatedAt: new Date().toISOString(),
+      });
+      return res.json({ status: 'ok', message: 'Credenciais PNBOX salvas' });
+    }
+
     const { error } = await supabase.from('pnbox_credentials').upsert(
       { user_id: userId, cpf: cpf.trim(), password, id_plano: idPlano?.trim?.() || '' },
       { onConflict: 'user_id' }
@@ -337,18 +510,37 @@ async function startServer() {
   // usando as credenciais salvas no banco (auto-reconnect / hub).
   app.post('/api/auth/pnbox-credentials/reconnect', authMiddleware, async (req, res) => {
     const userId = (req as any).user.id;
-    const { data } = await supabase
-      .from('pnbox_credentials')
-      .select('cpf, password, id_plano')
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (!data) {
+    let cred: { cpf: string; password: string; id_plano?: string } | null = null;
+
+    if (!supabase) {
+      const local = LOCAL_CREDENTIALS.get(userId);
+      if (local) {
+        cred = { cpf: local.cpf, password: local.password, id_plano: local.idPlano };
+      }
+    } else {
+      const { data } = await supabase
+        .from('pnbox_credentials')
+        .select('cpf, password, id_plano')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (data) {
+        cred = data;
+      }
+    }
+
+    if (!cred) {
       return res.status(400).json({ status: 'error', message: 'Nenhuma credencial PNBOX salva para este usuário' });
     }
     try {
+      const modo = globalAuthState.modoExecucao || 'DRY_RUN';
       const sessionResult = await iniciarSessaoPlaywright(
-        { cpf: data.cpf, password: data.password, idPlano: data.id_plano || ID_PLANO_PADRAO },
-        true
+        {
+          cpf: cred.cpf,
+          password: cred.password,
+          idPlano: extrairIdPlano(cred.id_plano || '') || ID_PLANO_PADRAO
+        },
+        true,
+        modo
       );
       res.json({
         status: sessionResult.status === 'authenticated' ? 'ok' : 'error',
@@ -636,22 +828,25 @@ async function startServer() {
       });
     }
 
-    if (modoExecucao === 'LIVE') {
-      globalAuthState.modoExecucao = 'LIVE';
-    } else {
-      globalAuthState.modoExecucao = 'DRY_RUN';
-    }
+    const modo = modoExecucao === 'LIVE' ? 'LIVE' : 'DRY_RUN';
+    globalAuthState.modoExecucao = modo;
+
+    const idPlanoNormalizado = extrairIdPlano(idPlano || '') || ID_PLANO_PADRAO;
 
     const credenciais = {
       cpf: String(cpf).trim(),
       password: String(password),
-      idPlano: idPlano || ID_PLANO_PADRAO
+      idPlano: idPlanoNormalizado
     };
 
-    const sessionResult = await iniciarSessaoPlaywright(credenciais, consentimentoAceito);
+    const sessionResult = await iniciarSessaoPlaywright(credenciais, consentimentoAceito, modo);
+    const isAuth = sessionResult.status === 'authenticated';
     res.json({
-      status: sessionResult.status === 'authenticated' ? 'ok' : 'error',
-      session: sessionResult
+      status: isAuth ? 'ok' : 'error',
+      session: sessionResult,
+      mensagem: isAuth
+        ? (modo === 'LIVE' ? 'Sessão oficial LIVE conectada com sucesso no PNBOX.' : 'Sessão DRY_RUN conectada com sucesso (simulação segura).')
+        : (sessionResult.ultimoLog || 'Falha ao autenticar sessão com o Sebrae ID.')
     });
   });
 
