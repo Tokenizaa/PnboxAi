@@ -1,24 +1,37 @@
-/**
- * Helper para chamadas autenticadas ao backend.
- * Adiciona automaticamente o modoExecucao atual (LIVE / DRY_RUN)
- * para que cada endpoint saiba se deve chamar o servidor real.
- */
+let authTokenGetter: (() => string | null) | null = null;
 
-import { AuthSessionState } from '../types/pnbox';
+export function setAuthTokenGetter(getter: () => string | null) {
+  authTokenGetter = getter;
+}
 
-export function authFetch(
-  url: string,
-  init: RequestInit,
-  authSession: AuthSessionState
-): Promise<Response> {
-  const body = init.body ? JSON.parse(init.body as string) : {};
-  body.modoExecucao = body.modoExecucao || authSession.modoExecucao || 'DRY_RUN';
-  return fetch(url, {
-    ...init,
-    headers: {
-      ...init.headers,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
+export async function apiCall<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  // Add auth header if we have a token getter
+  if (authTokenGetter) {
+    const token = authTokenGetter();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  const response = await fetch(endpoint, {
+    ...options,
+    headers,
   });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.message || `HTTP ${response.status}: ${response.statusText}`
+    );
+  }
+
+  return response.json();
 }

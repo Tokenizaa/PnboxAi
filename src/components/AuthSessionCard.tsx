@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -53,6 +53,19 @@ export const AuthSessionCard: React.FC<AuthSessionCardProps> = ({
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'read' | 'write'>('todos');
   const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Pré-popula CPF se disponível no banco (apenas na primeira renderização se cpf vazio)
+  useEffect(() => {
+    if (!authSession.cpf) {
+      fetch('/api/auth/pnbox-credentials')
+        .then(res => res.json())
+        .then(data => {
+          if (data.configured && data.data?.cpf) {
+            setCpf(data.data.cpf); // Apenas pré-popula CPF
+          }
+        });
+    }
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

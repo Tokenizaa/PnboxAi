@@ -57,18 +57,85 @@ export async function pnboxOidcLoginViaPlaywright(
 
     page = await context.newPage();
 
+    // Capturar logs do console do browser para debug
+    page.on('console', msg => {
+      console.log(`[Browser ${msg.type()}]`, msg.text().substring(0, 200));
+    });
+
     // ETAPA 1: Navegar para PNBOX → redireciona para Keycloak
     console.log('[OIDC/Playwright] Navegando para PNBOX...');
     await page.goto(PNBOX_BASE + '/', {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
+    const urlAposGoto = page.url();
+    console.log(`[OIDC/Playwright] URL após goto: ${urlAposGoto}`);
+
+    // Esperar React/MUI hidratar — pode haver delay no SPA
+    await page.waitForTimeout(2000);
+
+    // Se ainda está no PNBOX (não redirecionou), pode estar na home com botão "Entrar"
+    if (urlAposGoto.includes('pnbox.sebrae.com.br') && !urlAposGoto.includes('login') && !urlAposGoto.includes('amei')) {
+      console.log('[OIDC/Playwright] Procurando botão Entrar na home...');
+      // Esperar botão ficar visível (pode demorar para React renderizar)
+      try {
+        await page.waitForSelector('button:has-text("Entrar")', {
+          timeout: 10000,
+          state: 'visible'
+        });
+      } catch (e) {
+        console.error('[OIDC/Playwright] Botão Entrar não apareceu após 10s');
+      }
+
+      const entrarBtn = page.locator('button:has-text("Entrar")').first();
+      const btnCount = await entrarBtn.count();
+      console.log(`[OIDC/Playwright] ${btnCount} botão(ões) "Entrar" encontrado(s)`);
+
+      if (btnCount > 0) {
+        const visible = await entrarBtn.isVisible();
+        const enabled = await entrarBtn.isEnabled();
+        console.log(`[OIDC/Playwright] Botão visível: ${visible}, habilitado: ${enabled}`);
+
+        // Tentar clique com Promise.all para capturar navegação
+        try {
+          await Promise.all([
+            page.waitForNavigation({
+              waitUntil: 'domcontentloaded',
+              timeout: 30000
+            }).catch((e) => {
+              console.warn('[OIDC/Playwright] waitForNavigation timeout/error:', e.message.substring(0, 80));
+            }),
+            entrarBtn.click({ force: true, timeout: 5000 })
+          ]);
+          console.log(`[OIDC/Playwright] URL após clicar Entrar: ${page.url()}`);
+        } catch (e: any) {
+          console.error('[OIDC/Playwright] Falha ao clicar Entrar:', e.message);
+          // Tentar sem Promise.all
+          await entrarBtn.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(3000);
+          console.log(`[OIDC/Playwright] URL após segundo clique: ${page.url()}`);
+        }
+      }
+    }
 
     // Aguardar formulário de login do Keycloak
     console.log('[OIDC/Playwright] Aguardando tela de login SSO...');
-    await page.waitForSelector('input[name="username"], input#username', {
-      timeout: 15000
-    });
+    try {
+      await page.waitForSelector('input[name="username"], input#username', {
+        timeout: 20000,
+        state: 'visible'
+      });
+      console.log('[OIDC/Playwright] Form de login SSO detectado!');
+    } catch (e) {
+      // Debug: capturar screenshot e HTML para entender
+      const debugPath = `/tmp/pnbox-debug-${Date.now()}.png`;
+      await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
+      const html = await page.content().catch(() => '');
+      console.error(`[OIDC/Playwright] Falha. URL: ${page.url()}`);
+      console.error(`[OIDC/Playwright] Screenshot: ${debugPath}`);
+      console.error(`[OIDC/Playwright] HTML snippet: ${html.substring(0, 500)}`);
+      throw new Error(`[OIDC/Playwright] Form de login não apareceu em ${page.url()}`);
+    }
 
     // ETAPA 2: Preencher credenciais
     console.log(`[OIDC/Playwright] Preenchendo CPF (3 primeiros dígitos): ${cpf.substring(0, 3)}***`);
@@ -109,103 +176,59 @@ export async function pnboxOidcLoginViaPlaywright(
       );
     }
 
-    // ETAPA 5: Aguardar PNBOX carregar (deve mostrar a home ou redirecionar para /planoNegocio)
+    // ETAPA 5: Aguardar PNBOX carregar e armazenar tokens Meteor
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForFunction(
+      () => localStorage.getItem('Meteor.loginToken') !== null,
+      { timeout: 10000 }
+    ).catch(() => {});
 
-    // ETAPA 6: Extrair cookies do PNBOX (NÃO os do Keycloak)
-    const allCookies = await context.cookies();
-    const pnboxCookies = allCookies.filter(c =>
-      c.domain.includes('pnbox.sebrae.com.br') ||
-      c.domain === 'pnbox.sebrae.com.br' ||
-      c.domain === '.pnbox.sebrae.com.br'
-    );
+    // ETAPA 6: Extrair tokens Meteor do localStorage (mais confiáveis que cookies)
+    const meteorData = await page.evaluate(() => {
+      return {
+        loginToken: localStorage.getItem('Meteor.loginToken'),
+        userId: localStorage.getItem('Meteor.userId'),
+        loginTokenExpires: localStorage.getItem('Meteor.loginTokenExpires'),
+        // Cookies relevantes para WebSocket DDP
+        xMtok: document.cookie.split('; ').find(c => c.startsWith('x_mtok='))?.split('=')[1] || ''
+      };
+    });
 
-    if (pnboxCookies.length === 0) {
-      throw new Error('[OIDC/Playwright] Nenhum cookie do PNBOX encontrado após login');
+    if (!meteorData.loginToken || !meteorData.userId) {
+      throw new Error('[OIDC/Playwright] Meteor.loginToken/Meteor.userId ausentes após login');
     }
 
-    // Serializar cookies no formato Cookie header
+    console.log(`[OIDC/Playwright] Meteor tokens capturados: userId=${meteorData.userId}`);
+
+    // ETAPA 7: Extrair cookies do PNBOX para completar autenticação WebSocket
+    const allCookies = await context.cookies();
+    const pnboxCookies = allCookies.filter(c =>
+      c.domain.includes('pnbox.sebrae.com.br')
+    );
     const pnboxCookieHeader = pnboxCookies
       .map(c => `${c.name}=${c.value}`)
       .join('; ');
 
     console.log(`[OIDC/Playwright] ${pnboxCookies.length} cookies PNBOX capturados`);
 
-    // ETAPA 7: Capturar tokens OIDC via window/cookies do navegador
-    // O PNBOX armazena os tokens em localStorage ou cookies, vamos tentar ambos
-    let idToken = '';
-    let accessToken = '';
-    let refreshToken: string | undefined;
-
-    try {
-      const storage = await page.evaluate(() => {
-        const result: any = {};
-        try {
-          for (let i = 0; i < window.localStorage.length; i++) {
-            const key = window.localStorage.key(i);
-            if (key) {
-              result[key] = window.localStorage.getItem(key);
-            }
-          }
-          (window as any).sessionStorage && (window as any).sessionStorage.length;
-        } catch {}
-        return result;
-      });
-
-      // Procurar tokens em chaves comuns
-      for (const [key, val] of Object.entries(storage || {})) {
-        const strVal = String(val || '');
-        if (strVal.startsWith('eyJ') && strVal.length > 100) {
-          // JWT detectado
-          try {
-            const payload = JSON.parse(
-              Buffer.from(strVal.split('.')[1], 'base64').toString()
-            );
-            if (payload.typ === 'ID' || key.includes('id_token')) idToken = strVal;
-            if (payload.typ === 'Bearer' || key.includes('access_token')) accessToken = strVal;
-            if (key.includes('refresh_token')) refreshToken = strVal;
-          } catch {}
-        }
-      }
-    } catch (e) {
-      console.warn('[OIDC/Playwright] Não foi possível extrair tokens do localStorage:', e);
-    }
-
-    // Se não conseguimos extrair via localStorage, tentar pegar do ID da página (injetado por window.__meteor_runtime_config__)
-    if (!idToken || !accessToken) {
-      try {
-        const meteordata = await page.evaluate(() => {
-          const scripts = Array.from(document.querySelectorAll('script'));
-          for (const script of scripts) {
-            const txt = script.innerHTML;
-            if (txt.includes('__meteor_runtime_config__')) {
-              const m = txt.match(/__meteor_runtime_config__\s*=\s*JSON\.parse\(decodeURIComponent\("([^"]+)"\)\)/);
-              if (m) {
-                return decodeURIComponent(m[1]);
-              }
-            }
-          }
-          return null;
-        });
-        if (meteordata) {
-          console.log('[OIDC/Playwright] Meteor runtime config capturado');
-        }
-      } catch {}
-    }
-
-    // Fallback: usar valores vazios para tokens (cookies são suficientes para DDP)
-    if (!idToken) {
-      // Tokens vazios são OK — cookies sozinhos bastam para WebSocket DDP
-      console.log('[OIDC/Playwright] Tokens OIDC não encontrados — usando apenas cookies PNBOX');
+    // Calcular TTL real a partir do loginTokenExpires
+    let expiresAtMs = Date.now() + (50 * 60 * 1000);
+    if (meteorData.loginTokenExpires) {
+      const parsed = new Date(meteorData.loginTokenExpires).getTime();
+      if (!isNaN(parsed)) expiresAtMs = parsed;
     }
 
     return {
       pnboxCookies: pnboxCookieHeader,
-      idToken: idToken || 'cookie-only',
-      accessToken: accessToken || 'cookie-only',
-      refreshToken,
-      expiresAt: Date.now() + (50 * 60 * 1000) // 50 min — TTL interno do Hub
-    };
+      // Tokens Meteor são o que importam — cookies são secundários
+      idToken: meteorData.loginToken,
+      accessToken: meteorData.loginToken,
+      refreshToken: undefined,
+      expiresAt: expiresAtMs,
+      // Campos extras para o realRunner usar diretamente
+      meteorLoginToken: meteorData.loginToken,
+      meteorUserId: meteorData.userId
+    } as any;
   } finally {
     // SEMPRE fechar o navegador — é a fonte do risco de segurança
     try {

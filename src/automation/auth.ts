@@ -128,7 +128,10 @@ export function obterStatusSessaoAtualizada(): AuthSessionState {
   globalAuthState.tempoRestanteMinutos = restanteMin;
   globalAuthState.cpf = sessao.cpf;
   globalAuthState.idPlano = sessao.idPlano;
-  globalAuthState.meteorLoginToken = sessao.idToken.substring(0, 24) + '...';
+  // Mostrar token resumido para debug
+  globalAuthState.meteorLoginToken = sessao.idToken.length > 24
+    ? sessao.idToken.substring(0, 24) + '...'
+    : sessao.idToken;
   globalAuthState.meteorUserId = sessao.meteorUserId;
   globalAuthState.autenticadoEm = sessao.autenticadoEm;
   globalAuthState.expiresAt = sessao.expiraEm;
@@ -186,16 +189,20 @@ export async function iniciarSessaoPlaywright(
     const result = await pnboxOidcLoginViaPlaywright(credentials.cpf, credentials.password);
 
     const agora = Date.now();
+    // Preferir TTL do token Meteor sobre nosso TTL interno de 50min
+    const expiraEmMs = result.expiresAt || (agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000);
+
     sessaoAtual = {
       cookiesPnbox: result.pnboxCookies,
       idToken: result.idToken,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       meteorSessionId: undefined, // Será preenchido na primeira conexão DDP
+      meteorUserId: (result as any).meteorUserId,
       cpf: credentials.cpf,
       idPlano: credentials.idPlano,
       autenticadoEm: new Date(agora).toISOString(),
-      expiraEm: new Date(agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000).toISOString()
+      expiraEm: new Date(expiraEmMs).toISOString()
     };
 
     globalAuthState.status = 'authenticated';

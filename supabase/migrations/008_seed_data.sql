@@ -1,0 +1,7 @@
+-- Seed data: Plans
+INSERT INTO plans (id, nome, preco_mensal, limite_pesquisas, limite_execucoes, recursos, ativo) VALUES
+  ('11111111-1111-1111-1111-111111111111', 'Free', 0.00, 3, 1, '{"pnbox_tools": ["segmentacao", "personas"], "export": false}', true),
+  ('22222222-2222-2222-2222-222222222222', 'Starter', 97.00, 10, 5, '{"pnbox_tools": ["segmentacao", "personas", "jornada", "proposta_valor", "concorrencia"], "export": true, "api_access": false}', true),
+  ('33333333-3333-3333-3333-333333333333', 'Professional', 297.00, 50, 20, '{"pnbox_tools": ["segmentacao", "personas", "jornada", "proposta_valor", "concorrencia", "canais", "funil_vendas", "investimento_inicial", "custos_fixos", "custos_variaveis", "receitas", "dre_projetado", "indicadores", "simulador_cenarios"], "export": true, "api_access": true, "priority_support": true}', true),
+  ('44444444-4444-4444-4444-444444444444', 'Enterprise', 997.00, 200, 100, '{"pnbox_tools": ["segmentacao", "personas", "jornada", "proposta_valor", "concorrencia", "canais", "funil_vendas", "investimento_inicial", "custos_fixos", "custos_variaveis", "receitas", "dre_projetado", "indicadores", "simulador_cenarios"], "export": true, "api_access": true, "priority_support": true, "dedicated_support": true, "custom_integrations": true}', true)
+ON CONFLICT (id) DO NOTHING;

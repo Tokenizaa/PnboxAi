@@ -45,22 +45,35 @@ export interface BatchExecutionSummary {
 /**
  * Conexão DDP compartilhada por uma sessão autenticada.
  */
-let sharedDdp: { client: DdpClient; cookies: string; createdAt: number } | null = null;
+let sharedDdp: {
+  client: DdpClient;
+  cookies: string;
+  loginToken: string;
+  userId: string;
+  createdAt: number;
+  ddpSessionId?: string;
+} | null = null;
 
 const DDP_SHARED_TTL_MS = 50 * 60 * 1000; // 50 minutos
 
 /**
- * Garante uma conexão DDP ativa com o PNBOX.
+ * Garante uma conexão DDP ativa e autenticada com o PNBOX via Meteor.loginToken.
  * Reusa se já existir e estiver fresca; reconstrói caso contrário.
+ *
+ * @param cookies Cookies PNBOX (vindos do login Playwright)
+ * @param loginToken Meteor.loginToken
+ * @param userId Meteor.userId
  */
 export async function obterDdpConectado(
-  cookies: string
+  cookies: string,
+  loginToken: string,
+  userId: string
 ): Promise<DdpClient> {
   const agora = Date.now();
 
   if (
     sharedDdp &&
-    sharedDdp.cookies === cookies &&
+    sharedDdp.loginToken === loginToken &&
     (agora - sharedDdp.createdAt) < DDP_SHARED_TTL_MS &&
     sharedDdp.client.isConnected()
   ) {
@@ -82,10 +95,26 @@ export async function obterDdpConectado(
   const sessionId = await client.connect();
   console.log(`[DDP] conectado ao PNBOX — session ${sessionId.substring(0, 8)}...`);
 
+  // Restaurar sessão Meteor via loginWithToken
+  // O método Meteor.loginWithToken({ resume: token }) é chamado pelo cliente
+  // para associar a conexão WebSocket ao usuário autenticado
+  try {
+    const loginResult = await client.call('login', [{
+      resume: loginToken
+    }]);
+    console.log(`[DDP] Meteor.loginWithToken OK — userId: ${loginResult?.id || userId}`);
+  } catch (err: any) {
+    console.error('[DDP] Falha no Meteor.loginWithToken:', err.message);
+    throw new Error(`Falha ao autenticar DDP com Meteor token: ${err.message}`);
+  }
+
   sharedDdp = {
     client,
     cookies,
-    createdAt: agora
+    loginToken,
+    userId,
+    createdAt: agora,
+    ddpSessionId: sessionId
   };
 
   return client;
@@ -158,7 +187,7 @@ export async function executarFerramentaNoPnbox(
   ferramentaId: string,
   registros: Record<string, unknown>[],
   idPlano = ID_PLANO_PADRAO,
-  cookies?: string,
+  authContext?: { cookies?: string; loginToken?: string; userId?: string },
   metodoOverride?: string
 ): Promise<ExecutionStepResult> {
   const ferramenta = FERRAMENTAS_PNBOX.find((f) => f.id === ferramentaId);
@@ -167,6 +196,8 @@ export async function executarFerramentaNoPnbox(
   }
 
   const metodo = metodoOverride || `${ferramenta.collectionName}.insert`;
+
+  const temAuth = !!(authContext?.cookies || authContext?.loginToken);
 
   const step: ExecutionStepResult = {
     ferramentaId: ferramenta.id,
@@ -178,25 +209,29 @@ export async function executarFerramentaNoPnbox(
     totalRegistros: registros.length,
     registrosSalvos: 0,
     duracaoMs: 0,
-    mensagem: cookies
+    mensagem: temAuth
       ? 'Conectando ao DDP real do PNBOX...'
-      : 'ERRO: credenciais ausentes — não é possível executar contra servidor real',
+      : 'ERRO: sessão ausente — não é possível executar contra servidor real',
     docIds: [],
     rotaOficial: `https://pnbox.sebrae.com.br/planoNegocio/ferramentas/${idPlano}/${ferramenta.id}`,
     logs: []
   };
 
-  if (!cookies) {
+  if (!temAuth) {
     step.status = 'error';
-    step.mensagem = 'Sessão não autenticada — preencha CPF/senha na aba Sessão Playwright e clique em "Renovar Token" antes de executar.';
-    step.logs.push('Bloqueado: cookies de sessão ausentes.');
+    step.mensagem = 'Sessão não autenticada — preencha CPF/senha na aba Sessão Playwright e clique em "Salvar & Reautenticar" antes de executar.';
+    step.logs.push('Bloqueado: autenticação ausente.');
     return step;
   }
 
   const inicio = Date.now();
   let ddp: DdpClient;
   try {
-    ddp = await obterDdpConectado(cookies);
+    ddp = await obterDdpConectado(
+      authContext!.cookies || '',
+      authContext!.loginToken || '',
+      authContext!.userId || ''
+    );
   } catch (err: any) {
     step.status = 'error';
     step.mensagem = `Falha ao conectar DDP: ${err.message}`;

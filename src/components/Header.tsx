@@ -12,11 +12,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   Play,
-  Layers,
-  Sparkles,
   Building2,
   ExternalLink,
-  Edit3
+  Edit3,
+  Menu
 } from 'lucide-react';
 import { AuthSessionState } from '../types/pnbox';
 import { PlanSwitcherModal } from './PlanSwitcherModal';
@@ -29,6 +28,7 @@ interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   trafficCount: number;
+  onOpenSidebar: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -38,7 +38,8 @@ export const Header: React.FC<HeaderProps> = ({
   onUpdateActivePlanId,
   activeTab,
   setActiveTab,
-  trafficCount
+  trafficCount,
+  onOpenSidebar
 }) => {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [showPlanSwitcherModal, setShowPlanSwitcherModal] = useState(false);
@@ -95,98 +96,14 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-          {/* Navegação de Abas */}
-          <nav className="hidden lg:flex items-center space-x-1">
-            <button
-              onClick={() => setActiveTab('criar_plano_ia')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'criar_plano_ia'
-                  ? 'bg-gradient-to-r from-indigo-600/30 to-blue-600/30 text-indigo-300 border border-indigo-500/50 font-bold shadow-sm'
-                  : 'text-indigo-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-              <span>✨ Criar com IA (Deep Research)</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('preenchedor')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'preenchedor'
-                  ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-bold'
-                  : 'text-emerald-300/80 hover:bg-slate-800 hover:text-emerald-300'
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Preenchedor Oficial
-            </button>
-            <button
-              onClick={() => setActiveTab('fila_lote')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'fila_lote'
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 font-bold'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Fila em Lote (Batch)</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('guia_dados')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'guia_dados'
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 font-bold'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Guia & Schemas</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('mapa')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                activeTab === 'mapa'
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              Mapa Técnico
-            </button>
-            <button
-              onClick={() => setActiveTab('trafego')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors relative ${
-                activeTab === 'trafego'
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              Monitor de Tráfego
-              {trafficCount > 0 && (
-                <span className="ml-2 px-1.5 py-0.5 text-xs font-mono rounded-full bg-slate-800 text-cyan-400 border border-slate-700">
-                  {trafficCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('validador')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                activeTab === 'validador'
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              Validador JSON
-            </button>
-            <button
-              onClick={() => setActiveTab('autenticacao')}
-              className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                activeTab === 'autenticacao'
-                  ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              Sessão Playwright
-            </button>
-          </nav>
+          {/* Botão de abrir Sidebar (mobile) */}
+          <button
+            onClick={onOpenSidebar}
+            className="lg:hidden p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition-colors"
+            title="Abrir menu de páginas"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
 
           {/* Indicador de Status Online/Offline e Sessão */}
           <div className="flex items-center gap-2.5">

@@ -7,3 +7,9 @@ coverage/
 .env*
 !.env.example
 .playwright-mcp/
+
+# Cache directories
+.npm-cache/
+.playwright-browsers/
+.playwright-user-data/
+.supabase-home/

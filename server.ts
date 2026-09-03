@@ -1,6 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { createClient } from '@supabase/supabase-js';
 import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from './src/automation/schemaCatalog';
 import { compararJsonComSchema, compararDoisJson } from './src/automation/schemaValidator';
 import {
@@ -8,7 +10,8 @@ import {
   iniciarSessaoPlaywright,
   obterStatusSessaoAtualizada,
   simularExpiracaoSessao,
-  obterCookiesPnbox
+  obterCookiesPnbox,
+  obterSessaoAtual
 } from './src/automation/auth';
 import {
   obterEventosTrafego,
@@ -25,6 +28,7 @@ import { executarPesquisaUnificada, getNvidiaApiKey, NVIDIA_DEFAULT_MODELS } fro
 import { SchemaGenerator } from './src/utils/schemaGenerator';
 import { PlanAuditManager } from './src/utils/auditUtils';
 import { PlanoCriadoInfo } from './src/types/pnbox';
+import { ResearchEngine } from './src/research';
 
 // Armazenamento em memória de planos criados via IA / Deep Research / DDP
 const PLANOS_CRIADOS: PlanoCriadoInfo[] = [
@@ -41,14 +45,539 @@ const PLANOS_CRIADOS: PlanoCriadoInfo[] = [
   }
 ];
 
+// ===== AUTHENTICATION SYSTEM (Supabase Auth) =====
+// Login/registro agora usam Supabase Auth (auth.users). Tokens JWT são emitidos
+// pelo próprio Supabase. Dados ficam no banco, não em memória do servidor.
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn('[Auth] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY não configurados. Auth inoperante.');
+}
+
+// Client admin (service role): cria usuários, valida JWTs, acessa tabelas.
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
+});
+
+// Middleware de autenticação — valida o access token JWT do Supabase.
+function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ status: 'error', message: 'Token de acesso não fornecido' });
+  }
+  const token = authHeader.substring(7);
+  supabase.auth.getUser(token)
+    .then(({ data, error }) => {
+      if (error || !data.user) {
+        return res.status(401).json({ status: 'error', message: 'Token inválido ou expirado' });
+      }
+      // expõe { id (uuid), email, user_metadata } no req.user
+      const user = data.user;
+      (req as any).user = {
+        id: user.id,
+        email: user.email,
+        name: user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário',
+      };
+      next();
+    })
+    .catch(() => res.status(401).json({ status: 'error', message: 'Token inválido ou expirado' }));
+}
+
+// Opcional: middleware que não falha se não houver token
+function optionalAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    supabase.auth.getUser(authHeader.substring(7))
+      .then(({ data }) => {
+        if (data.user) {
+          (req as any).user = {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Usuário',
+          };
+        }
+        next();
+      })
+      .catch(() => next());
+  } else {
+    next();
+  }
+}
+
+// ===== PLANS CRUD API Types =====
+interface UserPlan {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  sector: string;
+  city: string;
+  progress: number;
+  status: 'rascunho' | 'pesquisa' | 'preparacao' | 'pronto' | 'executando' | 'concluido' | 'arquivado';
+  researchStatus: 'pending' | 'in_progress' | 'completed' | 'failed';
+  executionStatus: 'pending' | 'in_progress' | 'completed' | 'failed';
+  toolsFilled: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const USER_PLANS: Map<string, UserPlan[]> = new Map(); // userId -> Plan[]
+
+function generatePlanId(): string {
+  return 'plan_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+}
+
+function getUserPlans(userId: string): UserPlan[] {
+  return USER_PLANS.get(userId) || [];
+}
+
+function setUserPlans(userId: string, plans: UserPlan[]): void {
+  USER_PLANS.set(userId, plans);
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '10mb' }));
 
   // Popular tráfego de laboratório inicial
   popularEventosIniciaisDescoberta(ID_PLANO_PADRAO);
+
+  // ===== AUTH ROUTES =====
+  app.post('/api/auth/register', async (req, res) => {
+    const { name, email, password, confirmPassword } = req.body || {};
+
+    if (!name?.trim() || !email?.trim() || !password || !confirmPassword) {
+      return res.status(400).json({ status: 'error', message: 'Todos os campos são obrigatórios' });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ status: 'error', message: 'As senhas não conferem' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ status: 'error', message: 'Senha deve ter pelo menos 6 caracteres' });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ status: 'error', message: 'Email inválido' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Cria o usuário no Supabase Auth
+    const { data: created, error: createError } = await supabase.auth.admin.createUser({
+      email: normalizedEmail,
+      password,
+      email_confirm: true,
+      user_metadata: { name: name.trim() },
+    });
+    if (createError) {
+      // email já em uso → 409
+      if (createError.message && /already registered|already been registered/i.test(createError.message)) {
+        return res.status(409).json({ status: 'error', message: 'Email já cadastrado' });
+      }
+      return res.status(400).json({ status: 'error', message: createError.message });
+    }
+    const user = created.user;
+
+    // Cria o perfil na tabela profiles (id = auth.users.id)
+    await supabase.from('profiles').upsert(
+      { id: user.id, nome: name.trim(), email: normalizedEmail, role: 'user' },
+      { onConflict: 'id' }
+    );
+
+    // Gera a sessão (access + refresh token do Supabase)
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+    if (signInError || !signInData.session) {
+      return res.status(201).json({
+        status: 'ok',
+        message: 'Conta criada. Faça login para obter o token.',
+        user: { id: user.id, email: user.email, name: name.trim() },
+        accessToken: null,
+        refreshToken: null,
+        expiresIn: 0,
+      });
+    }
+
+    res.status(201).json({
+      status: 'ok',
+      user: { id: user.id, email: user.email, name: name.trim() },
+      accessToken: signInData.session.access_token,
+      refreshToken: signInData.session.refresh_token,
+      expiresIn: signInData.session.expires_in || 3600,
+    });
+  });
+
+  app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body || {};
+
+    if (!email?.trim() || !password) {
+      return res.status(400).json({ status: 'error', message: 'Email e senha são obrigatórios' });
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.toLowerCase().trim(),
+      password,
+    });
+    if (error || !data.session) {
+      return res.status(401).json({ status: 'error', message: 'Credenciais inválidas' });
+    }
+    const user = data.user;
+
+    res.json({
+      status: 'ok',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário',
+      },
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresIn: data.session.expires_in || 3600,
+    });
+  });
+
+  app.post('/api/auth/refresh', async (req, res) => {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      return res.status(400).json({ status: 'error', message: 'Refresh token é obrigatório' });
+    }
+
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+    if (error || !data.session) {
+      return res.status(401).json({ status: 'error', message: 'Refresh token inválido ou expirado' });
+    }
+
+    res.json({
+      status: 'ok',
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresIn: data.session.expires_in || 3600,
+    });
+  });
+
+  app.post('/api/auth/logout', authMiddleware, async (_req, res) => {
+    // O token de acesso é suficiente: Supabase invalida via refresh token no client.
+    // Aqui apenas reconhece o logout; revogação real é feita no cliente ao descartar o refresh token.
+    res.json({ status: 'ok', message: 'Logout realizado com sucesso' });
+  });
+
+  app.get('/api/auth/me', authMiddleware, async (req, res) => {
+    const user = (req as any).user;
+    // busca perfil criado (criadoAt/atualizadoAt vêm do banco)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id, nome, email, created_at, updated_at')
+      .eq('id', user.id)
+      .single();
+    res.json({
+      status: 'ok',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: profile?.nome || user.name,
+        createdAt: profile?.created_at,
+        updatedAt: profile?.updated_at,
+      },
+    });
+  });
+
+  // ===== CREDENCIAIS PNBOX (por usuário, no banco) =====
+  // GET /api/auth/pnbox-credentials - retorna config (NUNCA a senha)
+  app.get('/api/auth/pnbox-credentials', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
+    const { data } = await supabase
+      .from('pnbox_credentials')
+      .select('cpf, id_plano, updated_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!data) {
+      return res.json({ status: 'ok', configured: false, data: null });
+    }
+    res.json({
+      status: 'ok',
+      configured: true,
+      data: { cpf: data.cpf, idPlano: data.id_plano, updatedAt: data.updated_at },
+    });
+  });
+
+  // PUT /api/auth/pnbox-credentials - salva/atualiza credenciais PNBOX no banco
+  app.put('/api/auth/pnbox-credentials', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
+    const { cpf, password, idPlano } = req.body || {};
+    if (typeof cpf !== 'string' || !cpf.trim()) {
+      return res.status(400).json({ status: 'error', message: 'CPF é obrigatório' });
+    }
+    if (typeof password !== 'string' || !password) {
+      return res.status(400).json({ status: 'error', message: 'Senha é obrigatória' });
+    }
+    const { error } = await supabase.from('pnbox_credentials').upsert(
+      { user_id: userId, cpf: cpf.trim(), password, id_plano: idPlano?.trim?.() || '' },
+      { onConflict: 'user_id' }
+    );
+    if (error) {
+      return res.status(500).json({ status: 'error', message: `Falha ao salvar: ${error.message}` });
+    }
+    
+    // Log de auditoria para credenciais salvas
+    console.log(`[AUDIT] PNBOX credentials saved for user ${userId} at ${new Date().toISOString()}`);
+    
+    res.json({ status: 'ok', message: 'Credenciais PNBOX salvas' });
+  });
+
+  // POST /api/auth/pnbox-credentials/reconnect - reconecta a sessão PNBOX
+  // usando as credenciais salvas no banco (auto-reconnect / hub).
+  app.post('/api/auth/pnbox-credentials/reconnect', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
+    const { data } = await supabase
+      .from('pnbox_credentials')
+      .select('cpf, password, id_plano')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!data) {
+      return res.status(400).json({ status: 'error', message: 'Nenhuma credencial PNBOX salva para este usuário' });
+    }
+    try {
+      const sessionResult = await iniciarSessaoPlaywright(
+        { cpf: data.cpf, password: data.password, idPlano: data.id_plano || ID_PLANO_PADRAO },
+        true
+      );
+      res.json({
+        status: sessionResult.status === 'authenticated' ? 'ok' : 'error',
+        session: sessionResult,
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: 'error', message: err?.message || 'Erro ao reconectar' });
+    }
+  });
+
+  // ===== PLANS CRUD API (User-owned) =====
+  // GET /api/plans - List user's plans
+  app.get('/api/plans', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    res.json({ status: 'ok', plans });
+  });
+
+  // POST /api/plans - Create new plan
+  app.post('/api/plans', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const { name, description, sector, city } = req.body || {};
+
+    if (!name?.trim()) {
+      return res.status(400).json({ status: 'error', message: 'Nome do plano é obrigatório' });
+    }
+
+    const now = new Date().toISOString();
+    const plan: UserPlan = {
+      id: generatePlanId(),
+      userId: user.id,
+      name: name.trim(),
+      description: description?.trim() || '',
+      sector: sector?.trim() || 'Não definido',
+      city: city?.trim() || 'Brasil',
+      progress: 0,
+      status: 'rascunho',
+      researchStatus: 'pending',
+      executionStatus: 'pending',
+      toolsFilled: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const plans = getUserPlans(user.id);
+    plans.unshift(plan);
+    setUserPlans(user.id, plans);
+
+    res.status(201).json({ status: 'ok', plan });
+  });
+
+  // GET /api/plans/:id - Get single plan
+  app.get('/api/plans/:id', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    const plan = plans.find(p => p.id === req.params.id);
+
+    if (!plan) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    res.json({ status: 'ok', plan });
+  });
+
+  // PATCH /api/plans/:id - Update plan
+  app.patch('/api/plans/:id', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    const planIndex = plans.findIndex(p => p.id === req.params.id);
+
+    if (planIndex === -1) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    const updates = req.body || {};
+    const allowedFields = ['name', 'description', 'sector', 'city', 'progress', 'status', 'researchStatus', 'executionStatus', 'toolsFilled'];
+    const filteredUpdates: Partial<UserPlan> = {};
+
+    for (const key of allowedFields) {
+      if (updates[key] !== undefined) {
+        (filteredUpdates as any)[key] = updates[key];
+      }
+    }
+
+    filteredUpdates.updatedAt = new Date().toISOString();
+    plans[planIndex] = { ...plans[planIndex], ...filteredUpdates };
+    setUserPlans(user.id, plans);
+
+    res.json({ status: 'ok', plan: plans[planIndex] });
+  });
+
+  // DELETE /api/plans/:id - Delete plan
+  app.delete('/api/plans/:id', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    const filteredPlans = plans.filter(p => p.id !== req.params.id);
+
+    if (filteredPlans.length === plans.length) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    setUserPlans(user.id, filteredPlans);
+    res.json({ status: 'ok', message: 'Plano excluído com sucesso' });
+  });
+
+  // POST /api/plans/:id/duplicate - Duplicate plan
+  app.post('/api/plans/:id/duplicate', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    const plan = plans.find(p => p.id === req.params.id);
+
+    if (!plan) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    const now = new Date().toISOString();
+    const duplicatedPlan: UserPlan = {
+      ...plan,
+      id: generatePlanId(),
+      name: `${plan.name} (Cópia)`,
+      progress: 0,
+      status: 'rascunho',
+      researchStatus: 'pending',
+      executionStatus: 'pending',
+      toolsFilled: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    plans.unshift(duplicatedPlan);
+    setUserPlans(user.id, plans);
+
+    res.status(201).json({ status: 'ok', plan: duplicatedPlan });
+  });
+
+  // POST /api/plans/:id/archive - Archive plan
+  app.post('/api/plans/:id/archive', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    const planIndex = plans.findIndex(p => p.id === req.params.id);
+
+    if (planIndex === -1) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    plans[planIndex] = {
+      ...plans[planIndex],
+      status: 'arquivado',
+      updatedAt: new Date().toISOString(),
+    };
+    setUserPlans(user.id, plans);
+
+    res.json({ status: 'ok', plan: plans[planIndex] });
+  });
+
+  // ===== RESEARCH API =====
+  // POST /api/research - Start research for a plan
+  app.post('/api/research', authMiddleware, async (req, res) => {
+    const user = (req as any).user as any;
+    const { planId, prompt, cidadeUf, orcamentoEstimado, publicoAlvo, modeloAprofundado, provider, useSearchGrounding, maxIterations } = req.body || {};
+
+    if (!planId || !prompt?.trim()) {
+      return res.status(400).json({ status: 'error', message: 'planId e prompt são obrigatórios' });
+    }
+
+    // Verify plan belongs to user
+    const plans = getUserPlans(user.id);
+    const plan = plans.find(p => p.id === planId);
+    if (!plan) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    try {
+      const engine = new ResearchEngine();
+      const result = await engine.execute({
+        prompt,
+        cidadeUf: cidadeUf || 'Brasil / Nacional',
+        orcamentoEstimado: Number(orcamentoEstimado) || 100000,
+        publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
+        modeloAprofundado: !!modeloAprofundado,
+        idPlano: planId,
+        provider: provider || 'gemini',
+        useSearchGrounding: useSearchGrounding !== false,
+        maxIterations: maxIterations || 3,
+      });
+
+      // Update plan with research status
+      plan.researchStatus = 'completed';
+      plan.progress = Math.max(plan.progress, 30);
+      plan.updatedAt = new Date().toISOString();
+      setUserPlans(user.id, plans);
+
+      res.json({ status: 'ok', report: result.report });
+    } catch (err: any) {
+      plan.researchStatus = 'failed';
+      plan.updatedAt = new Date().toISOString();
+      setUserPlans(user.id, plans);
+      res.status(500).json({ status: 'error', message: err.message || 'Erro ao executar pesquisa' });
+    }
+  });
+
+  // GET /api/research/:planId - Get research report for a plan
+  app.get('/api/research/:planId', authMiddleware, (req, res) => {
+    const user = (req as any).user as any;
+    const plans = getUserPlans(user.id);
+    const plan = plans.find(p => p.id === req.params.planId);
+
+    if (!plan) {
+      return res.status(404).json({ status: 'error', message: 'Plano não encontrado' });
+    }
+
+    // For now return mock - in production would fetch from research storage
+    res.json({
+      status: 'ok',
+      report: {
+        plan: { id: req.params.planId },
+        sources: [],
+        evidence: [],
+        claims: [],
+        gaps: [],
+        contradictions: [],
+        sufficiency: { overall: 0, byCategory: {}, criticalGaps: [], minimumIterations: 2, targetIterations: 3, maximumIterations: 7, canConclude: false },
+        canonicalModel: {},
+        pnboxCollections: {},
+        validation: { valid: true, totalErrors: 0, totalWarnings: 0, detailsByCollection: {}, detailsByTool: {} },
+        completedAt: new Date().toISOString(),
+      },
+    });
+  });
 
   // --- ROTAS DA API DE AUTOMAÇÃO E ENGENHARIA REVERSA ---
 
@@ -135,8 +664,8 @@ async function startServer() {
     try {
       let stepResult;
       if (modo === 'LIVE') {
-        const cookies = obterCookiesPnbox();
-        if (!cookies) {
+        const sessao = obterSessaoAtual();
+        if (!sessao) {
           return res.status(401).json({
             status: 'error',
             mensagem: 'Modo LIVE solicitado mas não há sessão autenticada. Faça login primeiro.'
@@ -146,7 +675,11 @@ async function startServer() {
           ferramentaId,
           Array.isArray(registros) ? registros : [registros],
           plano,
-          cookies
+          {
+            cookies: sessao.cookiesPnbox,
+            loginToken: sessao.idToken,
+            userId: sessao.meteorUserId
+          }
         );
       } else {
         // DRY_RUN: usa o runner mock (simulação)
@@ -174,15 +707,20 @@ async function startServer() {
     const template = TEMPLATES_NEGOCIO.find((t) => t.id === templateId) || TEMPLATES_NEGOCIO[0];
 
     // No modo LIVE, exigimos sessão autenticada
-    let cookies: string | null = null;
+    let authContext: { cookies: string; loginToken: string; userId?: string } | null = null;
     if (modo === 'LIVE') {
-      cookies = obterCookiesPnbox();
-      if (!cookies) {
+      const sessao = obterSessaoAtual();
+      if (!sessao) {
         return res.status(401).json({
           status: 'error',
           mensagem: 'Modo LIVE solicitado mas não há sessão autenticada. Faça login primeiro.'
         });
       }
+      authContext = {
+        cookies: sessao.cookiesPnbox,
+        loginToken: sessao.idToken,
+        userId: sessao.meteorUserId
+      };
     }
 
     const executionSummary = prepararEstruturaExecucao(template.id, plano);
@@ -198,7 +736,7 @@ async function startServer() {
 
       const registros = dadosParaUsar[f.collectionName] || [f.exemploPayload];
       const result = modo === 'LIVE'
-        ? await executarFerramentaReal(f.id, registros, plano, cookies!)
+        ? await executarFerramentaReal(f.id, registros, plano, authContext!)
         : await executarFerramentaMock(f.id, registros, plano);
 
       step.status = result.status;
@@ -426,6 +964,94 @@ async function startServer() {
     });
   });
 
+  // 10.1 IA Deep Research V2 - Research Engine Agentic com Evidence Store
+  app.post('/api/ai/deep-research-v2', async (req, res) => {
+    const {
+      prompt,
+      cidadeUf,
+      orcamentoEstimado,
+      publicoAlvo,
+      modeloAprofundado,
+      idPlano,
+      provider,
+      useSearchGrounding,
+      maxIterations,
+      searchApiKey,
+      searchProvider
+    } = req.body || {};
+
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        mensagem: 'O prompt da ideia de negócio é obrigatório.'
+      });
+    }
+
+    try {
+      const engine = searchApiKey
+        ? new ResearchEngine({ searchProvider, searchApiKey })
+        : new ResearchEngine();
+
+      const result = await engine.execute({
+        prompt,
+        cidadeUf: cidadeUf || 'Brasil / Nacional',
+        orcamentoEstimado: Number(orcamentoEstimado) || 100000,
+        publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
+        modeloAprofundado: !!modeloAprofundado,
+        idPlano: idPlano || ID_PLANO_PADRAO,
+        provider: provider || 'gemini',
+        useSearchGrounding: useSearchGrounding !== false,
+        maxIterations: maxIterations || 3,
+        preserveLegacy: true,
+      });
+
+      res.json({
+        status: 'ok',
+        iterations: result.iterations,
+        durationMs: result.durationMs,
+        report: {
+          researchPlan: {
+            id: result.report.plan.id,
+            prompt: result.report.plan.prompt,
+            businessDefinition: result.report.plan.businessDefinition,
+            researchObjectives: result.report.plan.researchObjectives,
+            researchQuestions: result.report.plan.researchQuestions,
+            unknowns: result.report.plan.unknowns,
+            criticalVariables: result.report.plan.criticalVariables,
+            tasks: result.report.plan.tasks.map((t) => ({
+              id: t.id,
+              question: t.question,
+              objective: t.objective,
+              category: t.category,
+              priority: t.priority,
+              status: t.status,
+              queries: t.queries,
+              confidence: t.confidence,
+              iteration: t.iteration,
+              completedAt: t.completedAt,
+            })),
+            iterations: result.report.plan.iterations,
+            createdAt: result.report.plan.createdAt,
+            updatedAt: result.report.plan.updatedAt,
+          },
+          iterations: result.report.plan.iterations,
+          evidence: result.report.evidence,
+          claims: result.report.claims,
+          gaps: result.report.gaps,
+          contradictions: result.report.contradictions,
+          sufficiency: result.report.sufficiency,
+          canonicalModel: result.report.canonicalModel,
+          pnboxCollections: result.report.pnboxCollections,
+          validation: result.report.validation,
+          completedAt: result.report.completedAt,
+        },
+      });
+    } catch (err: any) {
+      console.error('[API /api/ai/deep-research-v2] Erro:', err);
+      res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao executar Deep Research V2' });
+    }
+  });
+
   // 11. Síntese Estruturada das 14 Ferramentas do PNBOX via IA e SchemaGenerator
   app.post('/api/ai/synthesize-plan', async (req, res) => {
     const { research, idPlano } = req.body || {};
@@ -597,8 +1223,10 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    console.log('[DEBUG] Serving static from:', distPath);
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
+      console.log('[DEBUG] Fallback for:', req.path);
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

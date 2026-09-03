@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Header } from './components/Header';
+import { AppSidebar } from './components/layout/AppSidebar';
 import { OfficialFillerPanel } from './components/OfficialFillerPanel';
 import { BatchProcessingQueue } from './components/BatchProcessingQueue';
 import { DocumentationGuide } from './components/DocumentationGuide';
@@ -17,13 +18,44 @@ import {
   InterceptedTrafficEvent
 } from './types/pnbox';
 import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from './automation/schemaCatalog';
-import { authFetch } from './utils/authFetch';
 import { TEMPLATES_NEGOCIO, BusinessTemplate } from './automation/businessTemplates';
 import { salvarPlanoNoHistorico } from './utils/planUtils';
 import { Building2, Edit3, ExternalLink, Plus, Sparkles, CheckCircle2 } from 'lucide-react';
+import { getPlatformSession } from './components/PlatformGate';
+
+// ====== Persistência das credenciais PNBOX ======
+// As credenciais PNBOX ficam NO BANCO (Supabase), atreladas ao usuário da
+// plataforma logado. O frontend nuca guarda a senha em localStorage.
+interface PnboxCreds {
+  cpf: string;
+  password: string;
+  idPlano: string;
+}
+
+// Token da plataforma (Supabase) para chamadas autenticadas ao banco.
+function platformToken(): string | null {
+  return getPlatformSession()?.accessToken || null;
+}
+
+// Salva as credenciais PNBOX do usuário logado no banco.
+async function persistirCredenciaisNoBanco(creds: PnboxCreds): Promise<boolean> {
+  const token = platformToken();
+  if (!token) return false;
+  try {
+    const res = await fetch('/api/auth/pnbox-credentials', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(creds),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('criar_plano_ia');
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [ferramentas, setFerramentas] = useState<FerramentaInfo[]>(FERRAMENTAS_PNBOX);
   const [templates, setTemplates] = useState<BusinessTemplate[]>(TEMPLATES_NEGOCIO);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('cafeteria_coworking');
@@ -47,9 +79,45 @@ export function App() {
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(false);
   const [ferramentaParaValidar, setFerramentaParaValidar] = useState<FerramentaInfo | undefined>(undefined);
   const [jsonParaValidar, setJsonParaValidar] = useState<unknown | undefined>(undefined);
-  const [ferramentaParaExecutar, setFerramentaParaExecutar] = useState<FerramentaInfo | null>(null);
+const [ferramentaParaExecutar, setFerramentaParaExecutar] = useState<FerramentaInfo | null>(null);
 
-  const handleUpdateActivePlanId = (novoId: string) => {
+// ====== Persistência das credenciais PNBOX ======
+// As credenciais PNBOX ficam NO BANCO (Supabase), atreladas ao usuário da
+// plataforma logado. O frontend nuca guarda a senha em localStorage.
+interface PnboxCreds {
+  cpf: string;
+  password: string;
+  idPlano: string;
+}
+
+// Token da plataforma (Supabase) para chamadas autenticadas ao banco.
+function platformToken(): string | null {
+  return getPlatformSession()?.accessToken || null;
+}
+
+// Salva as credenciais PNBOX do usuário logado no banco.
+async function persistirCredenciaisNoBanco(creds: PnboxCreds): Promise<boolean> {
+  const token = platformToken();
+  if (!token) return false;
+try {
+     const res = await fetch('/api/auth/pnbox-credentials', {
+       method: 'PUT',
+       headers: {
+         'Content-Type': 'application/json',
+         Authorization: `Bearer ${token}`
+       },
+       body: JSON.stringify(creds),
+     });
+     return res.ok;
+   } catch {
+     return false;
+   }
+}
+
+// Toast system for notifications
+
+
+const handleUpdateActivePlanId = (novoId: string) => {
     setAuthSession((prev) => ({
       ...prev,
       idPlano: novoId,
@@ -94,16 +162,48 @@ export function App() {
         }
       }
 
-      // 2. Status de Autenticação
-      const resAuth = await fetch('/api/automation/auth/status');
-      if (resAuth.ok) {
-        const dataAuth = await resAuth.json();
-        if (dataAuth.session) {
-          setAuthSession(dataAuth.session);
-        }
-      }
+// 2. Status de Autenticação
+       const resAuth = await fetch('/api/automation/auth/status');
+       if (resAuth.ok) {
+         const dataAuth = await resAuth.json();
+         if (dataAuth.session) {
+           setAuthSession(dataAuth.session);
+         }
+       }
 
-      // 3. Tráfego de Rede
+       // NEW: Trigger immediate reconnect if we have platform token and session is not authenticated
+       if (platformToken() && authSession.status !== 'authenticated') {
+         try {
+           const res = await fetch('/api/auth/pnbox-credentials/reconnect', {
+             method: 'POST',
+             headers: {
+               'Content-Type': 'application/json',
+               Authorization: `Bearer ${platformToken()}`
+             }
+           });
+           if (!res.ok) {
+             // Handle error
+             const data = await res.json();
+             if (res.status === 400 && data?.mensagem === 'Nenhuma credencial PNBOX salva') {
+               pushToast({
+                 level: 'warn',
+                 title: 'Credenciais PNBOX não configuradas',
+                 message: 'Para conexão automática, salve seu CPF/senha do PNBOX em Configurações → Sessão Playwright',
+                 duration: 8000,
+                 icon: 'warn'
+               });
+             }
+           }
+           // Note: If the reconnect succeeds, we might get a new session? 
+           // But we are not updating the authSession here because the existing polling/update will catch it.
+           // However, to be consistent, we could update the session if we get a new one.
+           // But the instruction does not specify. We'll leave it to the existing mechanisms.
+         } catch (err) {
+           console.error('Erro ao tentar reconectar imediatamente:', err);
+         }
+       }
+
+       // 3. Tráfego de Rede
       const resTraffic = await fetch('/api/automation/traffic');
       if (resTraffic.ok) {
         const dataTraffic = await resTraffic.json();
@@ -140,6 +240,15 @@ export function App() {
       if (data.session) {
         setAuthSession(data.session);
         const isLive = cred.modoExecucao === 'LIVE';
+        // Se logou na plataforma (Supabase) e a conexão PNBOX autenticou
+        // com consentimento, persiste as credenciais PNBOX no BANCO.
+        if (data.session.status === 'authenticated' && cred.consentimentoAceito) {
+          persistirCredenciaisNoBanco({
+            cpf: cred.cpf,
+            password: cred.password,
+            idPlano: cred.idPlano || ID_PLANO_PADRAO,
+          });
+        }
         pushToast({
           level: isLive ? 'warn' : 'success',
           title: isLive ? 'Login LIVE concluído' : 'Login DRY_RUN concluído',
@@ -251,24 +360,55 @@ export function App() {
     });
 
     try {
-      // NÃO chamar /auth/login automaticamente — sem credenciais salvas,
-      // isso falharia. Apenas orientar o usuário a autenticar manualmente.
-      // (Implementação anterior usava credenciais hardcoded — risco de segurança.)
+      // Requer sessão da plataforma (token Supabase) para ler as credenciais
+      // PNBOX do banco e reconectar.
+      if (!platformToken()) {
+        dismissToast(reconnectingToastId);
+        pushToast({
+          level: 'warn',
+          title: 'Sessão PNBOX expirada',
+          message: 'Faça login na plataforma e informe suas credenciais PNBOX na aba "Sessão Playwright" para que possamos reconectar automaticamente.',
+          duration: 8000,
+          icon: 'warn'
+        });
+        return false;
+      }
+
+      const res = await fetch('/api/auth/pnbox-credentials/reconnect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${platformToken()}`
+        }
+      });
+      const data = await res.json();
+
       dismissToast(reconnectingToastId);
+      if (res.ok && data.session?.status === 'authenticated') {
+        setAuthSession(data.session);
+        pushToast({
+          level: 'success',
+          title: 'Sessão PNBOX renovada',
+          message: 'Conexão reconectada automaticamente usando as credenciais salvas no banco.',
+          duration: 4000,
+          icon: 'check'
+        });
+        return true;
+      }
+
       pushToast({
-        level: 'warn',
-        title: 'Sessão PNBOX expirada',
-        message: 'Por segurança, o Hub não reconecta automaticamente sem credenciais. ' +
-                 'Abra a aba "Sessão Playwright", insira CPF/senha e clique em "Salvar & Reautenticar".',
-        duration: 8000,
-        icon: 'warn'
+        level: 'error',
+        title: 'Falha na reconexão automática',
+        message: data?.mensagem || `HTTP ${res.status}`,
+        duration: 6000,
+        icon: 'error'
       });
       return false;
     } catch (err: any) {
       dismissToast(reconnectingToastId);
       pushToast({
         level: 'error',
-        title: 'Falha ao verificar reconexão',
+        title: 'Falha na reconexão automática',
         message: err?.message || 'Erro desconhecido',
         duration: 6000,
         icon: 'error'
@@ -337,19 +477,30 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans antialiased">
-      {/* Cabeçalho de Navegação e Status */}
-      <Header
-        authSession={authSession}
-        onRefreshAuth={carregarDados}
-        onOpenAuthModal={() => setActiveTab('autenticacao')}
-        onUpdateActivePlanId={handleUpdateActivePlanId}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex font-sans antialiased">
+      {/* Sidebar de Navegação */}
+      <AppSidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        trafficCount={eventosTrafego.length}
+        onSelectTab={setActiveTab}
+        authSession={authSession}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       {/* Conteúdo Principal */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Cabeçalho de Navegação e Status */}
+        <Header
+          authSession={authSession}
+          onRefreshAuth={carregarDados}
+          onOpenAuthModal={() => setActiveTab('autenticacao')}
+          onUpdateActivePlanId={handleUpdateActivePlanId}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          trafficCount={eventosTrafego.length}
+          onOpenSidebar={() => setSidebarOpen(true)}
+        />
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Banner de Estratégia de Automação & Seletor de Plano Ativo */}
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-5 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -530,6 +681,7 @@ export function App() {
       <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500 font-mono">
         Sebrae PNBOX Oficial • Engenharia Reversa, Validação de Schema & Preenchimento Automatizado • Plano: {authSession.idPlano}
       </footer>
+      </div>
     </div>
   );
 }
