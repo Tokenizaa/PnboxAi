@@ -1,4 +1,4 @@
-import { aiProvider } from '../../ai/unifiedProvider';
+import { InternalResearchProvider, internalResearchProvider, ResearchSearchRequest } from '../../research/engine/InternalResearchProvider';
 import { sourceValidationSkill, ValidatedSource } from '../source-validation';
 
 export interface WebResearchQuery {
@@ -22,82 +22,80 @@ export interface WebResearchResult {
 }
 
 export class WebResearchSkill {
+  private provider: InternalResearchProvider;
+
+  constructor(provider?: InternalResearchProvider) {
+    this.provider = provider || new InternalResearchProvider();
+  }
+
   /**
    * Pesquisa dados reais de mercado para uma questão de negócio
+   * Usa pesquisa grounded interna (Gemini + Google Search Grounding)
    */
   public async search(request: WebResearchQuery): Promise<WebResearchResult> {
     const executedAt = new Date().toISOString();
     const location = request.location || 'Brasil / Nacional';
 
-    const systemPrompt = `Você é um pesquisador sênior de inteligência de mercado do Sebrae.
-Sua missão é fornecer dados factuais, realistas e verificáveis sobre o mercado brasileiro.
-Nunca invente dados fictícios. Indique fontes reais do ecossistema brasileiro (como Sebrae, IBGE, Banco Central, Associações Setoriais, etc.).`;
+    const researchRequest: ResearchSearchRequest = {
+      query: request.query,
+      category: request.category as any,
+      location,
+      industry: request.industry,
+    };
 
-    const userPrompt = `Realize uma pesquisa aprofundada sobre a seguinte questão:
-"${request.query}"
-Setor: ${request.industry || 'Geral'}
-Região: ${location}
-Categoria: ${request.category}
-
-Responda em JSON com fatos concretos e fontes de referência:
-{
-  "summary": "Resumo analítico dos dados encontrados...",
-  "facts": [
-    {
-      "claim": "Fato ou estatística confirmada",
-      "evidence": "Trecho ou evidência numérica que sustenta a afirmação",
-      "sourceUrl": "https://url-real-da-fonte.com.br",
-      "sourceTitle": "Nome da Publicação / Instituição",
-      "confidence": 0.9
-    }
-  ],
-  "sources": [
-    {
-      "url": "https://sebrae.com.br/...",
-      "title": "Título da publicação",
-      "publisher": "Sebrae Nacional"
-    }
-  ]
-}`;
-
-    const schemaDescription = `{
-  "summary": "string",
-  "facts": [{"claim": "string", "evidence": "string", "sourceUrl": "string", "sourceTitle": "string", "confidence": 0.9}],
-  "sources": [{"url": "string", "title": "string", "publisher": "string"}]
-}`;
-
-    const structured = await aiProvider.generateStructured<{
-      summary: string;
-      facts: Array<{ claim: string; evidence: string; sourceUrl: string; sourceTitle: string; confidence: number }>;
-      sources: Array<{ url: string; title: string; publisher: string }>;
-    }>(userPrompt, systemPrompt, schemaDescription);
+    const result = await this.provider.search(researchRequest);
 
     // Validação estrita de fontes
-    const rawSources = Array.isArray(structured.sources) ? structured.sources : [];
-    if (rawSources.length === 0) {
-      // Adiciona fontes oficiais garantidas para o setor
-      rawSources.push(
-        { url: 'https://sebrae.com.br/sites/PortalSebrae/ideiasdenegocios', title: 'Sebrae Ideias de Negócios', publisher: 'Sebrae Nacional' },
-        { url: 'https://www.ibge.gov.br', title: 'IBGE Estatísticas Econômicas', publisher: 'Instituto Brasileiro de Geografia e Estatística' }
-      );
-    }
-
+    const rawSources = Array.isArray(result.sources) ? result.sources : [];
     const validatedSources = sourceValidationSkill.validateBatch(rawSources);
 
-    const facts = (Array.isArray(structured.facts) ? structured.facts : []).map(f => ({
-      claim: f.claim,
-      evidence: f.evidence,
-      sourceUrl: f.sourceUrl || validatedSources[0]?.url || 'https://sebrae.com.br',
-      confidence: typeof f.confidence === 'number' ? Math.min(Math.max(f.confidence, 0.1), 0.99) : 0.85
-    }));
+    // Extrair fatos do answer e grounding metadata
+    const facts = this.extractFactsFromResult(result, validatedSources);
 
     return {
       query: request.query,
-      summary: structured.summary || 'Síntese de pesquisa de mercado concluída com sucesso.',
+      summary: result.answer,
       sources: validatedSources,
       facts,
-      executedAt
+      executedAt,
     };
+  }
+
+  private extractFactsFromResult(
+    result: { answer: string; sources: Array<{ url: string; title: string; snippet?: string }> },
+    validatedSources: ValidatedSource[]
+  ): Array<{ claim: string; evidence: string; sourceUrl: string; confidence: number }> {
+    const facts: Array<{ claim: string; evidence: string; sourceUrl: string; confidence: number }> = [];
+    
+    // Use the answer as a claim if it contains substantial content
+    if (result.answer && result.answer.length > 50) {
+      const primarySource = validatedSources[0];
+      if (primarySource) {
+        facts.push({
+          claim: `Pesquisa sobre: ${result.answer.substring(0, 200)}...`,
+          evidence: result.answer.substring(0, 500),
+          sourceUrl: primarySource.url,
+          confidence: 0.8,
+        });
+      }
+    }
+
+    // Extract facts from source snippets
+    for (const source of result.sources) {
+      if (source.snippet && source.snippet.length > 30) {
+        const validatedSource = validatedSources.find(vs => vs.url === source.url);
+        if (validatedSource) {
+          facts.push({
+            claim: `Fonte: ${source.title}`,
+            evidence: source.snippet,
+            sourceUrl: source.url,
+            confidence: validatedSource.reliability * 0.9,
+          });
+        }
+      }
+    }
+
+    return facts;
   }
 }
 

@@ -236,10 +236,11 @@ export class PnboxAdapter {
   private mapCapitalGiro(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const wc = m.financials.investment.workingCapital;
     if (wc === 0) return [];
+    // prazoMedioVendas/Compras não disponíveis no modelo canônico - retornar 0 para evitar dados fictícios
     return [{
       idPlano,
-      prazoMedioVendas: 7,
-      prazoMedioCompras: 30,
+      prazoMedioVendas: 0,
+      prazoMedioCompras: 0,
       reservaFinanceira: wc,
     }];
   }
@@ -263,13 +264,8 @@ export class PnboxAdapter {
   }
 
   private mapQuadroExperimentacao(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return [{
-      idPlano,
-      descricao: "Hipótese principal: modelo de negócio será validado nos primeiros 3 meses de operação",
-      categoria: "Solução",
-      nivelIncerteza: "Médio",
-      nivelImportancia: "Alta",
-    }];
+    // Sem dados reais de hipóteses no modelo canônico - retornar array vazio
+    return [];
   }
 
   private mapFunilVendas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
@@ -277,8 +273,9 @@ export class PnboxAdapter {
       idPlano,
       nome: ch.name,
       orcamento: ch.monthlyInvestment,
-      qtdPessoasAlcancadas: Math.round(ch.monthlyInvestment * 10),
-      qtdPessoasChamadas: Math.round(ch.monthlyInvestment * 0.5),
+      // qtdPessoasAlcancadas/Chamadas são estimativas - retornar 0 para evitar dados fictícios
+      qtdPessoasAlcancadas: 0,
+      qtdPessoasChamadas: 0,
     }));
   }
 

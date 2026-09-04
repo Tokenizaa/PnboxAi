@@ -22,7 +22,7 @@ export {
   ResearchSufficiencyAnalyzer,
   researchSufficiency,
 } from "./engine";
-export type { SearchResult, FetchResult, SourceEngineConfig } from "./engine";
+export type { SearchResult, FetchResult } from "./engine";
 export {
   ResearchSynthesizer,
   researchSynthesizer,

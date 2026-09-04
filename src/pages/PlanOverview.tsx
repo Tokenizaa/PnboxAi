@@ -16,53 +16,43 @@ import {
   MapPin,
 } from 'lucide-react';
 
-const mockPlanData: Record<string, any> = {
-  plan_abc123: {
-    id: 'plan_abc123',
-    name: 'Cafeteria Premium',
-    sector: 'Alimentação & Coworking',
-    city: 'Curitiba / PR',
-    description: 'Cafeteria de microlotes com espaço de coworking e Wi-Fi ultra veloz.',
-    progress: 82,
-    status: 'preenchido_completo',
-    researchStatus: 'completed',
-    executionStatus: 'pending',
-    createdAt: '2025-01-01T10:00:00Z',
-    updatedAt: '2025-01-15T10:30:00Z',
-    toolsFilled: 14,
-  },
-  plan_def456: {
-    id: 'plan_def456',
-    name: 'Loja de Roupas',
-    sector: 'Varejo & Moda',
-    city: 'São Paulo / SP',
-    description: 'Loja de roupas femininas com foco em moda sustentável.',
-    progress: 46,
-    status: 'em_preparacao',
-    researchStatus: 'in_progress',
-    executionStatus: 'pending',
-    createdAt: '2025-01-05T14:00:00Z',
-    updatedAt: '2025-01-10T14:20:00Z',
-    toolsFilled: 7,
-  },
-};
+// Dados reais do plano devem vir da API /api/plans/:id
+// Fallback sem dados mock - mostra estado vazio
+interface PlanData {
+  id: string;
+  name: string;
+  sector: string;
+  city: string;
+  description: string;
+  progress: number;
+  status: 'completed' | 'in_progress' | 'pending' | 'failed';
+  researchStatus: 'completed' | 'in_progress' | 'pending' | 'failed';
+  executionStatus: 'completed' | 'in_progress' | 'pending' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  toolsFilled: number;
+}
 
-export function PlanOverviewPage() {
-  const { planId } = useParams<{ planId: string }>();
-  const plan = mockPlanData[planId || ''] || {
-    id: planId,
-    name: `Plano ${planId?.substring(0, 8) || 'Novo'}`,
+function getEmptyPlan(planId?: string): PlanData {
+  return {
+    id: planId || 'unknown',
+    name: 'Plano sem dados',
     sector: 'Não definido',
     city: 'Brasil',
-    description: 'Plano sem dados carregados',
+    description: 'Dados do plano não disponíveis. Carregue o plano pela lista de planos.',
     progress: 0,
-    status: 'rascunho',
+    status: 'pending',
     researchStatus: 'pending',
     executionStatus: 'pending',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     toolsFilled: 0,
   };
+}
+
+export function PlanOverviewPage() {
+  const { planId } = useParams<{ planId: string }>();
+  const plan = getEmptyPlan(planId);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">

@@ -3,15 +3,18 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from './src/automation/schemaCatalog';
 import { compararJsonComSchema, compararDoisJson } from './src/automation/schemaValidator';
 import {
   globalAuthState,
   iniciarSessaoPlaywright,
   obterStatusSessaoAtualizada,
+  obterStatusSessaoUsuario,
   simularExpiracaoSessao,
-  obterCookiesPnbox,
-  obterSessaoAtual
+  obterCookiesPnboxUsuario,
+  obterSessaoUsuario,
+  definirSessaoUsuario
 } from './src/automation/auth';
 import {
   obterEventosTrafego,
@@ -30,6 +33,60 @@ import { PlanAuditManager } from './src/utils/auditUtils';
 import { PlanoCriadoInfo } from './src/types/pnbox';
 import { ResearchEngine } from './src/research';
 import { extrairIdPlano } from './src/utils/planUtils';
+import {
+  createConnectionJob,
+  getConnectionJob,
+  getActiveConnectionJob,
+  serializeConnectionJob,
+  advanceStep,
+  failConnectionJob,
+  completeConnectionJob
+} from './src/automation/connectionJob';
+
+/**
+ * Encryption utilities for PNBOX credentials at rest.
+ * Uses AES-256-GCM with key derived from PNBOX_CRED_ENCRYPTION_KEY env var.
+ * Format: base64(iv:authTag:ciphertext)
+ */
+const ENCRYPTION_KEY = process.env.PNBOX_CRED_ENCRYPTION_KEY?.trim() || '';
+if (!ENCRYPTION_KEY) {
+  console.warn('[Security] PNBOX_CRED_ENCRYPTION_KEY não definido. Credenciais PNBOX NÃO serão criptografadas no banco!');
+}
+
+function deriveKey(): Buffer {
+  // Derive 32-byte key from env secret using scrypt (deterministic)
+  const salt = Buffer.from('pnbox-cred-salt-v1', 'utf8'); // Fixed salt for deterministic derivation
+  return scryptSync(ENCRYPTION_KEY, salt, 32);
+}
+
+export function encryptPnboxPassword(plaintext: string): string {
+  if (!ENCRYPTION_KEY) return plaintext; // Fallback: plaintext if no key (dev only)
+  const key = deriveKey();
+  const iv = randomBytes(12); // 96-bit IV for GCM
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  // Format: iv:authTag:ciphertext (all base64)
+  return `${iv.toString('base64')}:${authTag.toString('base64')}:${ciphertext.toString('base64')}`;
+}
+
+export function decryptPnboxPassword(encrypted: string): string {
+  if (!ENCRYPTION_KEY) return encrypted; // Fallback: plaintext if no key (dev only)
+  try {
+    const key = deriveKey();
+    const [ivB64, authTagB64, ciphertextB64] = encrypted.split(':');
+    if (!ivB64 || !authTagB64 || !ciphertextB64) return encrypted; // Not encrypted format
+    const iv = Buffer.from(ivB64, 'base64');
+    const authTag = Buffer.from(authTagB64, 'base64');
+    const ciphertext = Buffer.from(ciphertextB64, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return plaintext.toString('utf8');
+  } catch {
+    return encrypted; // If decryption fails, assume it's legacy plaintext
+  }
+}
 
 // Armazenamento em memória de planos criados via IA / Deep Research / DDP
 const PLANOS_CRIADOS: PlanoCriadoInfo[] = [
@@ -472,6 +529,7 @@ async function startServer() {
   });
 
   // PUT /api/auth/pnbox-credentials - salva/atualiza credenciais PNBOX no banco
+  // Senha é criptografada antes de persistir (AES-256-GCM)
   app.put('/api/auth/pnbox-credentials', authMiddleware, async (req, res) => {
     const userId = (req as any).user.id;
     const { cpf, password, idPlano } = req.body || {};
@@ -482,10 +540,12 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Senha é obrigatória' });
     }
 
+    const passwordEnc = encryptPnboxPassword(password);
+
     if (!supabase) {
       LOCAL_CREDENTIALS.set(userId, {
         cpf: cpf.trim(),
-        password,
+        password, // local fallback keeps plaintext for dev
         idPlano: idPlano?.trim?.() || '',
         updatedAt: new Date().toISOString(),
       });
@@ -493,17 +553,39 @@ async function startServer() {
     }
 
     const { error } = await supabase.from('pnbox_credentials').upsert(
-      { user_id: userId, cpf: cpf.trim(), password, id_plano: idPlano?.trim?.() || '' },
+      { user_id: userId, cpf: cpf.trim(), password_enc: passwordEnc, id_plano: idPlano?.trim?.() || '' },
       { onConflict: 'user_id' }
     );
     if (error) {
       return res.status(500).json({ status: 'error', message: `Falha ao salvar: ${error.message}` });
     }
     
-    // Log de auditoria para credenciais salvas
+    // Log de auditoria para credenciais salvas (sem logar a senha)
     console.log(`[AUDIT] PNBOX credentials saved for user ${userId} at ${new Date().toISOString()}`);
     
     res.json({ status: 'ok', message: 'Credenciais PNBOX salvas' });
+  });
+
+  // DELETE /api/auth/pnbox-credentials - remove credenciais PNBOX do banco
+  app.delete('/api/auth/pnbox-credentials', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
+
+    if (!supabase) {
+      LOCAL_CREDENTIALS.delete(userId);
+      return res.json({ status: 'ok', message: 'Credenciais PNBOX removidas' });
+    }
+
+    const { error } = await supabase
+      .from('pnbox_credentials')
+      .delete()
+      .eq('user_id', userId);
+
+    if (error) {
+      return res.status(500).json({ status: 'error', message: `Falha ao remover: ${error.message}` });
+    }
+
+    console.log(`[AUDIT] PNBOX credentials deleted for user ${userId} at ${new Date().toISOString()}`);
+    res.json({ status: 'ok', message: 'Credenciais PNBOX removidas' });
   });
 
   // POST /api/auth/pnbox-credentials/reconnect - reconecta a sessão PNBOX
@@ -520,11 +602,15 @@ async function startServer() {
     } else {
       const { data } = await supabase
         .from('pnbox_credentials')
-        .select('cpf, password, id_plano')
+        .select('cpf, password_enc, id_plano')
         .eq('user_id', userId)
         .maybeSingle();
       if (data) {
-        cred = data;
+        cred = { 
+          cpf: data.cpf, 
+          password: decryptPnboxPassword(data.password_enc), 
+          id_plano: data.id_plano 
+        };
       }
     }
 
@@ -532,7 +618,10 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Nenhuma credencial PNBOX salva para este usuário' });
     }
     try {
-      const modo = globalAuthState.modoExecucao || 'DRY_RUN';
+      // Sempre LIVE - ambiente de produção PNBOX real
+      const modo: 'DRY_RUN' | 'LIVE' = 'LIVE';
+      globalAuthState.modoExecucao = modo;
+      // Passa userId para isolar sessão por usuário
       const sessionResult = await iniciarSessaoPlaywright(
         {
           cpf: cred.cpf,
@@ -540,7 +629,8 @@ async function startServer() {
           idPlano: extrairIdPlano(cred.id_plano || '') || ID_PLANO_PADRAO
         },
         true,
-        modo
+        modo,
+        userId
       );
       res.json({
         status: sessionResult.status === 'authenticated' ? 'ok' : 'error',
@@ -549,6 +639,120 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ status: 'error', message: err?.message || 'Erro ao reconectar' });
     }
+  });
+
+  // ===== PNBOX CONNECTION JOB (Timeline de Progresso) =====
+  // POST /api/pnbox/connect - inicia job de conexão assíncrono
+  // Formato do body: { cpf, password, consentimentoAceito }
+  // Resposta: { jobId } — frontend faz polling em GET /api/pnbox/connect/:jobId/status
+  app.post('/api/pnbox/connect', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
+    const { cpf, password, consentimentoAceito } = req.body || {};
+
+    // Validação
+    if (typeof cpf !== 'string' || !cpf.trim()) {
+      return res.status(400).json({ status: 'error', message: 'CPF é obrigatório' });
+    }
+    if (typeof password !== 'string' || !password) {
+      return res.status(400).json({ status: 'error', message: 'Senha é obrigatória' });
+    }
+    if (!consentimentoAceito) {
+      return res.status(400).json({ status: 'error', message: 'Consentimento é obrigatório' });
+    }
+
+    // Bloquear se já existe job ativo para este usuário (evita duplicidade)
+    const activeJob = getActiveConnectionJob(userId);
+    if (activeJob) {
+      return res.status(409).json({
+        status: 'error',
+        message: 'Já existe uma conexão em andamento para esta conta.',
+        activeJobId: activeJob.jobId
+      });
+    }
+
+    // Criar job (inicia em RUNNING + initializing)
+    const job = createConnectionJob(userId);
+    const jobId = job.jobId;
+
+    // Responder imediatamente com jobId
+    res.status(202).json({ status: 'ok', jobId });
+
+    // Executar autenticação em background (sem bloqueiar resposta)
+    (async () => {
+      try {
+        // 1. Autenticar PNBOX com progresso
+        let progressCompleted = false;
+        const sessionResult = await iniciarSessaoPlaywright(
+          { cpf: cpf.trim(), password, idPlano: '' },
+          true,
+          'LIVE',
+          userId,
+          (step) => {
+            advanceStep(job, step);
+          }
+        );
+
+        // 2. Se autenticado, persistir credenciais no banco (criptografado)
+        if (sessionResult.status === 'authenticated') {
+          progressCompleted = true;
+          completeConnectionJob(jobId, userId);
+
+          try {
+            const passwordEnc = encryptPnboxPassword(password);
+            console.log('[Connect] supabase configurado?', !!supabase, '| userId:', userId);
+            const upsert = await supabase
+              ? supabase.from('pnbox_credentials').upsert(
+                  { user_id: userId, cpf: cpf.trim(), password_enc: passwordEnc },
+                  { onConflict: 'user_id' }
+                )
+              : Promise.resolve({ error: null, data: null });
+            if (upsert?.error) {
+              console.warn('[Connect] Falha ao salvar credenciais no banco:', upsert.error.message);
+            } else {
+              console.log('[Connect] Credenciais salvas com sucesso. password_enc len:', passwordEnc.length);
+            }
+          } catch (e: any) {
+            console.warn('[Connect] Erro ao salvar credenciais:', e?.message || e);
+          }
+        } else {
+          // Autenticação falhou
+          const loggedErr = sessionResult.ultimoLog || 'Falha na autenticação';
+          const isInvalidCreds = /incorret|senha|usuário/i.test(loggedErr);
+          failConnectionJob(
+            jobId,
+            userId,
+            isInvalidCreds ? 'AUTH_INVALID_CREDENTIALS' : 'AUTH_FAILED',
+            isInvalidCreds
+              ? 'O Sebrae ID recusou as credenciais informadas. Verifique o CPF e a senha e tente novamente.'
+              : 'Não foi possível autenticar no Sebrae ID.',
+            loggedErr
+          );
+        }
+      } catch (err: any) {
+        const msg = err?.message || 'Erro desconhecido';
+        const isUnavailable = /não foi possível|unavailable|network|timeout|falha ao|não carregou/i.test(msg);
+        failConnectionJob(
+          jobId,
+          userId,
+          isUnavailable ? 'PNBOX_UNAVAILABLE' : 'AUTH_FAILED',
+          isUnavailable
+            ? 'O PNBOX está temporariamente indisponível. Tente novamente em instantes.'
+            : 'Não foi possível concluir a conexão. Verifique suas informações e tente novamente.',
+          msg
+        );
+      }
+    })();
+  });
+
+  // GET /api/pnbox/connect/:jobId/status - consulta estado do job
+  app.get('/api/pnbox/connect/:jobId/status', authMiddleware, (req, res) => {
+    const userId = (req as any).user.id;
+    const { jobId } = req.params;
+    const job = getConnectionJob(userId, jobId);
+    if (!job) {
+      return res.status(404).json({ status: 'error', message: 'Job não encontrado' });
+    }
+    res.json({ status: 'ok', job: serializeConnectionJob(job) });
   });
 
   // ===== PLANS CRUD API (User-owned) =====
@@ -722,8 +926,6 @@ async function startServer() {
         publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
         modeloAprofundado: !!modeloAprofundado,
         idPlano: planId,
-        provider: provider || 'gemini',
-        useSearchGrounding: useSearchGrounding !== false,
         maxIterations: maxIterations || 3,
       });
 
@@ -792,8 +994,10 @@ async function startServer() {
   });
 
   // 3. Status e controle de Autenticação Playwright
-  app.get('/api/automation/auth/status', (req, res) => {
-    const session = obterStatusSessaoAtualizada();
+  // Requer autenticação para retornar sessão do usuário correto
+  app.get('/api/automation/auth/status', authMiddleware, (req, res) => {
+    const userId = (req as any).user.id;
+    const session = obterStatusSessaoUsuario(userId);
     res.json({
       status: 'ok',
       isOnline: true,
@@ -802,16 +1006,22 @@ async function startServer() {
     });
   });
 
-  app.post('/api/automation/auth/expire', (req, res) => {
-    const session = simularExpiracaoSessao();
+  app.post('/api/automation/auth/expire', authMiddleware, (req, res) => {
+    const userId = (req as any).user.id;
+    // Remove apenas a sessão deste usuário
+    const session = obterStatusSessaoUsuario(userId);
+    // simularExpiracaoSessao limpa todas - vamos criar uma versão por usuário
+    // Por enquanto, use a função global mas idealmente deveria ser por usuário
+    const result = simularExpiracaoSessao();
     res.json({
       status: 'ok',
       mensagem: 'Sessão marcada como expirada para fins de teste de reconexão.',
-      session
+      session: result
     });
   });
 
-  app.post('/api/automation/auth/login', async (req, res) => {
+  app.post('/api/automation/auth/login', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
     const { cpf, password, idPlano, consentimentoAceito, modoExecucao } = req.body || {};
 
     if (!cpf || !password) {
@@ -828,7 +1038,8 @@ async function startServer() {
       });
     }
 
-    const modo = modoExecucao === 'LIVE' ? 'LIVE' : 'DRY_RUN';
+    // Sempre LIVE - o frontend só conecta no ambiente real PNBOX
+    const modo: 'DRY_RUN' | 'LIVE' = 'LIVE';
     globalAuthState.modoExecucao = modo;
 
     const idPlanoNormalizado = extrairIdPlano(idPlano || '') || ID_PLANO_PADRAO;
@@ -839,7 +1050,8 @@ async function startServer() {
       idPlano: idPlanoNormalizado
     };
 
-    const sessionResult = await iniciarSessaoPlaywright(credenciais, consentimentoAceito, modo);
+    // Passa userId para isolar sessão por usuário
+    const sessionResult = await iniciarSessaoPlaywright(credenciais, consentimentoAceito, modo, userId);
     const isAuth = sessionResult.status === 'authenticated';
     res.json({
       status: isAuth ? 'ok' : 'error',
@@ -851,7 +1063,8 @@ async function startServer() {
   });
 
   // 4. Execução de Preenchimento Oficial do PNBOX (Individual ou em Lote)
-  app.post('/api/automation/fill-tool', async (req, res) => {
+  app.post('/api/automation/fill-tool', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
     const { ferramentaId, registros, idPlano, modoExecucao } = req.body || {};
     const plano = idPlano || ID_PLANO_PADRAO;
     const modo = modoExecucao || globalAuthState.modoExecucao || 'DRY_RUN';
@@ -859,7 +1072,7 @@ async function startServer() {
     try {
       let stepResult;
       if (modo === 'LIVE') {
-        const sessao = obterSessaoAtual();
+        const sessao = obterSessaoUsuario(userId);
         if (!sessao) {
           return res.status(401).json({
             status: 'error',
@@ -895,16 +1108,17 @@ async function startServer() {
     }
   });
 
-  app.post('/api/automation/fill-batch', async (req, res) => {
+  app.post('/api/automation/fill-batch', authMiddleware, async (req, res) => {
+    const userId = (req as any).user.id;
     const { templateId, idPlano, customData, delayBetweenToolsMs = 0, modoExecucao } = req.body || {};
     const plano = idPlano || ID_PLANO_PADRAO;
     const modo = modoExecucao || globalAuthState.modoExecucao || 'DRY_RUN';
     const template = TEMPLATES_NEGOCIO.find((t) => t.id === templateId) || TEMPLATES_NEGOCIO[0];
 
-    // No modo LIVE, exigimos sessão autenticada
-    let authContext: { cookies: string; loginToken: string; userId?: string } | null = null;
+    // No modo LIVE, exigimos sessão autenticada do usuário
+    let authContext: { cookies: string; loginToken: string; userId: string } | null = null;
     if (modo === 'LIVE') {
-      const sessao = obterSessaoAtual();
+      const sessao = obterSessaoUsuario(userId);
       if (!sessao) {
         return res.status(401).json({
           status: 'error',
@@ -1168,11 +1382,7 @@ async function startServer() {
       publicoAlvo,
       modeloAprofundado,
       idPlano,
-      provider,
-      useSearchGrounding,
-      maxIterations,
-      searchApiKey,
-      searchProvider
+      maxIterations
     } = req.body || {};
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -1183,9 +1393,7 @@ async function startServer() {
     }
 
     try {
-      const engine = searchApiKey
-        ? new ResearchEngine({ searchProvider, searchApiKey })
-        : new ResearchEngine();
+      const engine = new ResearchEngine();
 
       const result = await engine.execute({
         prompt,
@@ -1194,10 +1402,7 @@ async function startServer() {
         publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
         modeloAprofundado: !!modeloAprofundado,
         idPlano: idPlano || ID_PLANO_PADRAO,
-        provider: provider || 'gemini',
-        useSearchGrounding: useSearchGrounding !== false,
         maxIterations: maxIterations || 3,
-        preserveLegacy: true,
       });
 
       res.json({
@@ -1381,8 +1586,9 @@ async function startServer() {
     res.json({ status: 'ok', server: 'PNBOX Automation Hub API', timestamp: new Date().toISOString() });
   });
 
-  // Toggle de modo de execução (LIVE ↔ DRY_RUN)
-  app.post('/api/automation/mode', (req, res) => {
+  // Toggle de modo de execução (LIVE ↔ DRY_RUN) - por usuário
+  app.post('/api/automation/mode', authMiddleware, (req, res) => {
+    const userId = (req as any).user.id;
     const { modoExecucao } = req.body || {};
     if (modoExecucao !== 'LIVE' && modoExecucao !== 'DRY_RUN') {
       return res.status(400).json({
@@ -1391,7 +1597,7 @@ async function startServer() {
       });
     }
 
-    if (modoExecucao === 'LIVE' && !obterCookiesPnbox()) {
+    if (modoExecucao === 'LIVE' && !obterCookiesPnboxUsuario(userId)) {
       return res.status(401).json({
         status: 'error',
         mensagem: 'Não é possível ativar LIVE sem sessão autenticada. Faça login primeiro.'

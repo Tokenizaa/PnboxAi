@@ -63,22 +63,18 @@ export class DeepResearchSkill {
     // Valida e consolida fontes únicas
     const uniqueSources = sourceValidationSkill.validateBatch(allSources);
 
-    const result: DeepResearchSkillResult = {
-      researchId,
-      planId: options.planId,
-      userId: options.userId,
-      resumoExecutivo: summaries[0] || `Pesquisa aprofundada realizada com sucesso sobre ${options.prompt}.`,
-      oportunidadeMercado: summaries[1] || 'Oportunidade identificada com forte demanda latente no mercado.',
-      tendencias: [
-        'Adoção massiva de canais digitais e atendimento automatizado',
-        'Transparência e agilidade na entrega de valor',
-        'Modelos de precificação claros e sem taxas ocultas'
-      ],
-      fontes: uniqueSources,
-      fatosVerificados: allFacts,
-      duracaoMs: Date.now() - inicio,
-      concluidoEm: new Date().toISOString()
-    };
+const result: DeepResearchSkillResult = {
+       researchId,
+       planId: options.planId,
+       userId: options.userId,
+       resumoExecutivo: summaries.length > 0 ? summaries[0] : '',
+       oportunidadeMercado: summaries.length > 1 ? summaries[1] : '',
+       tendencias: [], // To be derived from research if needed
+       fontes: uniqueSources,
+       fatosVerificados: allFacts,
+       duracaoMs: Date.now() - inicio,
+       concluidoEm: new Date().toISOString()
+     };
 
     // Persistência real no banco através da DatabaseSkill
     await databaseSkill.insert('research', {

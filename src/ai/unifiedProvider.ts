@@ -101,33 +101,26 @@ export class UnifiedAiProvider {
   }
 
   /**
-   * Executa chamada de chat com o provedor unificado (NVIDIA primário com fallback)
+   * Executa chamada de chat com o provedor unificado (NVIDIA primário, SEM fallback silencioso)
+   * Fallback explícito deve ser tratado pelo chamador se necessário
    */
   public async chat(messages: AiMessage[], options: AiRequestOptions = {}): Promise<string> {
     const provider = options.provider || this.getPrimaryProvider();
-    const fallback = options.fallbackToAlternative !== false;
 
     if (provider === 'nvidia') {
       try {
         return await this.callNvidia(messages, options);
       } catch (nvidiaError: any) {
-        console.warn(`[AI Provider] Falha na chamada NVIDIA: ${nvidiaError.message}`);
-        if (fallback && process.env.GEMINI_API_KEY) {
-          console.info('[AI Provider] Acionando fallback transparente para Gemini...');
-          return await this.callGemini(messages, options);
-        }
-        throw nvidiaError;
+        console.error(`[AI Provider] Falha na chamada NVIDIA: ${nvidiaError.message}`);
+        // Não fazer fallback silencioso - lançar erro para chamador tratar explicitamente
+        throw new Error(`NVIDIA provider failed: ${nvidiaError.message}. Configure fallback explicitly if needed.`);
       }
     } else {
       try {
         return await this.callGemini(messages, options);
       } catch (geminiError: any) {
-        console.warn(`[AI Provider] Falha na chamada Gemini: ${geminiError.message}`);
-        if (fallback && this.getNvidiaApiKey(1, options.customApiKey)) {
-          console.info('[AI Provider] Acionando fallback transparente para NVIDIA...');
-          return await this.callNvidia(messages, options);
-        }
-        throw geminiError;
+        console.error(`[AI Provider] Falha na chamada Gemini: ${geminiError.message}`);
+        throw new Error(`Gemini provider failed: ${geminiError.message}. Configure fallback explicitly if needed.`);
       }
     }
   }

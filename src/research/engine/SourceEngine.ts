@@ -1,6 +1,6 @@
 import { Source, SourceType, ResearchCategory } from "../types";
-import { getSourceReliability, classifySourceType, SOURCE_TYPE_KEYWORDS } from "../policies";
-import { evidenceStore } from "../evidence";
+import { getSourceReliability, classifySourceType } from "../policies";
+import { InternalResearchProvider, ResearchSearchRequest } from "./InternalResearchProvider";
 
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -21,23 +21,6 @@ export interface FetchResult {
   publishedAt?: string;
   metadata?: Record<string, unknown>;
 }
-
-export interface SourceEngineConfig {
-  searchProvider: "tavily" | "brave" | "serpapi" | "custom";
-  apiKey?: string;
-  maxResultsPerQuery: number;
-  fetchTimeoutMs: number;
-  enableCache: boolean;
-  minReliability: number;
-}
-
-const DEFAULT_CONFIG: SourceEngineConfig = {
-  searchProvider: "custom",
-  maxResultsPerQuery: 10,
-  fetchTimeoutMs: 15000,
-  enableCache: true,
-  minReliability: 0.4,
-};
 
 const SEARCH_QUERY_TEMPLATES: Record<ResearchCategory, string[]> = {
   market: [
@@ -83,11 +66,15 @@ const SEARCH_QUERY_TEMPLATES: Record<ResearchCategory, string[]> = {
 };
 
 export class SourceEngine {
-  private config: SourceEngineConfig;
-  private cache = new Map<string, FetchResult>();
+  private provider: InternalResearchProvider;
+  private fetchCache = new Map<string, FetchResult>();
+  private maxResultsPerQuery: number = 10;
+  private minReliability: number = 0.4;
 
-  constructor(config: Partial<SourceEngineConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+  constructor(config?: { maxResultsPerQuery?: number; minReliability?: number }) {
+    this.provider = new InternalResearchProvider();
+    this.maxResultsPerQuery = config?.maxResultsPerQuery ?? 10;
+    this.minReliability = config?.minReliability ?? 0.4;
   }
 
   async search(query: string, category: ResearchCategory): Promise<SearchResult[]> {
@@ -95,252 +82,52 @@ export class SourceEngine {
     const allResults: SearchResult[] = [];
 
     for (const eq of expandedQueries) {
-      const results = await this.executeSearch(eq);
-      allResults.push(...results);
+      const request: ResearchSearchRequest = {
+        query: eq,
+        category,
+      };
+      const result = await this.provider.search(request);
+      
+      for (const src of result.sources) {
+        const reliability = getSourceReliability(classifySourceType(src.url, src.title));
+        if (reliability >= this.minReliability) {
+          allResults.push({
+            url: src.url,
+            title: src.title,
+            snippet: src.snippet || '',
+            publisher: new URL(src.url).hostname,
+          });
+        }
+      }
     }
 
     const deduplicated = this.deduplicateResults(allResults);
-    const filtered = deduplicated.filter((r) => this.estimateReliability(r) >= this.config.minReliability);
-
-    return filtered.slice(0, this.config.maxResultsPerQuery);
+    return deduplicated.slice(0, this.maxResultsPerQuery);
   }
 
-  private expandQueries(query: string, category: ResearchCategory): string[] {
-    const templates = SEARCH_QUERY_TEMPLATES[category] || ["{query} Brasil"];
-    return templates.map((t) => t.replace("{query}", query));
-  }
-
-  private async executeSearch(query: string): Promise<SearchResult[]> {
-    if (this.config.searchProvider === "tavily" && this.config.apiKey) {
-      return this.searchTavily(query);
-    }
-    if (this.config.searchProvider === "brave" && this.config.apiKey) {
-      return this.searchBrave(query);
-    }
-    if (this.config.searchProvider === "serpapi" && this.config.apiKey) {
-      return this.searchSerpApi(query);
-    }
-
-    return this.searchCustom(query);
-  }
-
-  private async searchTavily(query: string): Promise<SearchResult[]> {
-    try {
-      const response = await fetch("https://api.tavily.com/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.config.apiKey}`,
-        },
-        body: JSON.stringify({
-          query,
-          search_depth: "advanced",
-          max_results: this.config.maxResultsPerQuery,
-          include_domains: [],
-          exclude_domains: ["wikipedia.org", "quora.com", "reddit.com"],
-        }),
-      });
-
-      if (!response.ok) throw new Error(`Tavily search failed: ${response.status}`);
-      const data = await response.json();
-
-      return (data.results || []).map((r: any) => ({
-        url: r.url,
-        title: r.title,
-        snippet: r.content,
-        publisher: new URL(r.url).hostname.replace("www.", ""),
-      }));
-    } catch (error) {
-      console.warn("[SourceEngine] Tavily search failed, falling back:", error);
-      return this.searchCustom(query);
-    }
-  }
-
-  private async searchBrave(query: string): Promise<SearchResult[]> {
-    try {
-      const response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${this.config.maxResultsPerQuery}`, {
-        headers: {
-          "Accept": "application/json",
-          "X-Subscription-Token": this.config.apiKey!,
-        },
-      });
-
-      if (!response.ok) throw new Error(`Brave search failed: ${response.status}`);
-      const data = await response.json();
-
-      return (data.web?.results || []).map((r: any) => ({
-        url: r.url,
-        title: r.title,
-        snippet: r.description,
-        publisher: r.meta_url?.hostname || new URL(r.url).hostname.replace("www.", ""),
-      }));
-    } catch (error) {
-      console.warn("[SourceEngine] Brave search failed, falling back:", error);
-      return this.searchCustom(query);
-    }
-  }
-
-  private async searchSerpApi(query: string): Promise<SearchResult[]> {
-    try {
-      const response = await fetch(`https://serpapi.com/search.json?q=${encodeURIComponent(query)}&num=${this.config.maxResultsPerQuery}&api_key=${this.config.apiKey}`);
-
-      if (!response.ok) throw new Error(`SerpAPI search failed: ${response.status}`);
-      const data = await response.json();
-
-      return (data.organic_results || []).map((r: any) => ({
-        url: r.link,
-        title: r.title,
-        snippet: r.snippet,
-        publisher: r.source || new URL(r.link).hostname.replace("www.", ""),
-      }));
-    } catch (error) {
-      console.warn("[SourceEngine] SerpAPI search failed, falling back:", error);
-      return this.searchCustom(query);
-    }
-  }
-
-  private async searchCustom(query: string): Promise<SearchResult[]> {
-    const mockResults: SearchResult[] = [
-      { url: "https://sebrae.com.br/estudo-mercado", title: "Sebrae - Estudo de Mercado", snippet: "Dados oficiais do Sebrae sobre mercado...", publisher: "sebrae.com.br" },
-      { url: "https://ibge.gov.br/estatisticas", title: "IBGE - Estatísticas Oficiais", snippet: "Estatísticas oficiais do IBGE...", publisher: "ibge.gov.br" },
-      { url: "https://valor.globo.com/negocios", title: "Valor Econômico - Negócios", snippet: "Análise de mercado do Valor...", publisher: "valor.globo.com" },
-      { url: "https://exame.com/negocios", title: "Exame - Negócios", snippet: "Reportagem sobre setor...", publisher: "exame.com" },
-    ];
-
-    return mockResults.map((r) => ({ ...r, snippet: `${r.snippet} [query: ${query}]` }));
-  }
-
-  private estimateReliability(result: SearchResult): number {
-    return getSourceReliability(classifySourceType(result.url, result.title));
-  }
-
-  private deduplicateResults(results: SearchResult[]): SearchResult[] {
-    const seen = new Set<string>();
-    const unique: SearchResult[] = [];
-
-    for (const r of results) {
-      const normalized = this.normalizeUrl(r.url);
-      if (!seen.has(normalized)) {
-        seen.add(normalized);
-        unique.push(r);
-      }
-    }
-
-    return unique.sort((a, b) => this.estimateReliability(b) - this.estimateReliability(a));
-  }
-
-  private normalizeUrl(url: string): string {
-    try {
-      const u = new URL(url);
-      u.hash = "";
-      u.searchParams.sort();
-      return u.toString();
-    } catch {
-      return url;
-    }
-  }
-
-  async fetch(url: string): Promise<FetchResult | null> {
-    if (this.config.enableCache && this.cache.has(url)) {
-      return this.cache.get(url)!;
-    }
-
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.config.fetchTimeoutMs);
-
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "PNBOXAI-ResearchBot/1.0 (+https://pnboxai.com/bot)",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-      });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const html = await response.text();
-      const { title, content, publishedAt } = this.extractContent(html, url);
-
-      const result: FetchResult = {
-        url,
-        title,
-        content,
-        publisher: new URL(url).hostname.replace("www.", ""),
-        publishedAt,
-        metadata: { fetchedAt: new Date().toISOString() },
-      };
-
-      if (this.config.enableCache) {
-        this.cache.set(url, result);
-      }
-
-      return result;
-    } catch (error) {
-      console.warn(`[SourceEngine] Fetch failed for ${url}:`, error);
-      return null;
-    }
-  }
-
-  private extractContent(html: string, url: string): { title: string; content: string; publishedAt?: string } {
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : new URL(url).hostname;
-
-    let content = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
-      .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    content = content.substring(0, 50000);
-
-    const dateMatch = html.match(/<meta[^>]*property="article:published_time"[^>]*content="([^"]+)"/i) ||
-                      html.match(/<meta[^>]*name="pubdate"[^>]*content="([^"]+)"/i) ||
-                      html.match(/<time[^>]*datetime="([^"]+)"/i);
-    const publishedAt = dateMatch ? dateMatch[1] : undefined;
-
-    return { title, content, publishedAt };
-  }
-
-  async searchAndFetch(query: string, category: ResearchCategory): Promise<FetchResult[]> {
-    const searchResults = await this.search(query, category);
-    const fetchResults: FetchResult[] = [];
-
-    for (const result of searchResults) {
-      const fetched = await this.fetch(result.url);
-      if (fetched) {
-        fetchResults.push(fetched);
-      }
-    }
-
-    return fetchResults;
-  }
-
-  async processTaskQueries(task: { queries: string[]; category: ResearchCategory }): Promise<Source[]> {
+  async processTaskQueries(params: { queries: string[]; category: ResearchCategory }): Promise<Source[]> {
     const allSources: Source[] = [];
+    const seenUrls = new Set<string>();
 
-    for (const query of task.queries) {
-      const fetchResults = await this.searchAndFetch(query, task.category);
+    for (const query of params.queries) {
+      const searchResults = await this.search(query, params.category);
+      
+      for (const sr of searchResults) {
+        if (seenUrls.has(sr.url.toLowerCase())) continue;
+        seenUrls.add(sr.url.toLowerCase());
 
-      for (const fr of fetchResults) {
-        const source = evidenceStore.addSource({
-          url: fr.url,
-          title: fr.title,
-          publisher: fr.publisher,
-          type: classifySourceType(fr.url, fr.title),
-          reliability: getSourceReliability(classifySourceType(fr.url, fr.title)),
+        const source: Source = {
+          id: generateId("src"),
+          url: sr.url,
+          title: sr.title,
+          publisher: sr.publisher,
+          type: classifySourceType(sr.url, sr.title),
+          reliability: getSourceReliability(classifySourceType(sr.url, sr.title)),
+          retrievedAt: new Date().toISOString(),
           metadata: {
-            fetchedAt: fr.metadata?.fetchedAt,
-            publishedAt: fr.publishedAt,
-            contentLength: fr.content.length,
+            snippet: sr.snippet,
           },
-        } as any);
+        };
         allSources.push(source);
       }
     }
@@ -348,16 +135,130 @@ export class SourceEngine {
     return allSources;
   }
 
-  getConfig(): SourceEngineConfig {
-    return { ...this.config };
+  async fetch(url: string): Promise<FetchResult | null> {
+    if (this.fetchCache.has(url)) {
+      return this.fetchCache.get(url)!;
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; PNBOXAI/1.0; +https://pnbox.ai)',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const html = await response.text();
+      const title = this.extractTitle(html) || new URL(url).hostname;
+      const content = this.extractContent(html);
+
+      const result: FetchResult = {
+        url,
+        title,
+        content,
+        publisher: new URL(url).hostname,
+        metadata: {
+          fetchedAt: new Date().toISOString(),
+          contentLength: content.length,
+        },
+      };
+
+      this.fetchCache.set(url, result);
+      return result;
+    } catch (error) {
+      console.error(`[SourceEngine] Fetch failed for ${url}:`, error);
+      return null;
+    }
   }
 
-  updateConfig(config: Partial<SourceEngineConfig>): void {
-    this.config = { ...this.config, ...config };
+  async searchAndFetch(
+    query: string,
+    category: ResearchCategory
+  ): Promise<Source[]> {
+    const searchResults = await this.search(query, category);
+    const allSources: Source[] = [];
+
+    for (const sr of searchResults) {
+      const fetchResult = await this.fetch(sr.url);
+      if (fetchResult) {
+        const source: Source = {
+          id: generateId("src"),
+          url: fetchResult.url,
+          title: fetchResult.title,
+          publisher: fetchResult.publisher,
+          type: classifySourceType(fetchResult.url, fetchResult.title),
+          reliability: getSourceReliability(classifySourceType(fetchResult.url, fetchResult.title)),
+          retrievedAt: new Date().toISOString(),
+          metadata: {
+            fetchedAt: fetchResult.metadata?.fetchedAt,
+            contentLength: fetchResult.content.length,
+            snippet: sr.snippet,
+          },
+        };
+        allSources.push(source);
+      }
+    }
+
+    return allSources;
+  }
+
+  private expandQueries(query: string, category: ResearchCategory): string[] {
+    const templates = SEARCH_QUERY_TEMPLATES[category] || ["{query} Brasil"];
+    return templates.map((t) => t.replace("{query}", query));
+  }
+
+  private deduplicateResults(results: SearchResult[]): SearchResult[] {
+    const seen = new Set<string>();
+    return results.filter((r) => {
+      const key = r.url.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private extractTitle(html: string): string | null {
+    const match = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    return match ? match[1].trim() : null;
+  }
+
+  private extractContent(html: string): string {
+    let content = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+      .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return content.substring(0, 50000);
+  }
+
+  getConfig(): { maxResultsPerQuery: number; minReliability: number } {
+    return {
+      maxResultsPerQuery: this.maxResultsPerQuery,
+      minReliability: this.minReliability,
+    };
+  }
+
+  updateConfig(config: { maxResultsPerQuery?: number; minReliability?: number }): void {
+    if (config.maxResultsPerQuery !== undefined) {
+      this.maxResultsPerQuery = config.maxResultsPerQuery;
+    }
+    if (config.minReliability !== undefined) {
+      this.minReliability = config.minReliability;
+    }
   }
 
   clearCache(): void {
-    this.cache.clear();
+    this.fetchCache.clear();
   }
 }
 

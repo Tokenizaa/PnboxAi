@@ -19,21 +19,21 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID identificador do plano de negócio', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Nome ou título do segmento', exemplo: 'Jovens Universitários Urbanos' },
-      { nome: 'variavel1', tipo: 'string', obrigatorio: false, descricao: '1ª Dimensão ou eixo de segmentação', exemplo: 'Faixa Etária (18-25 anos)' },
-      { nome: 'variavel1Oposto', tipo: 'string', obrigatorio: false, descricao: 'Oposto da 1ª dimensão', exemplo: 'Acima de 25 anos' },
-      { nome: 'variavel2', tipo: 'string', obrigatorio: false, descricao: '2ª Dimensão ou comportamento', exemplo: 'Consumo digital diário' },
-      { nome: 'variavel2Oposto', tipo: 'string', obrigatorio: false, descricao: 'Oposto da 2ª dimensão', exemplo: 'Consumo tradicional/offline' },
-      { nome: 'segmento', tipo: 'string', obrigatorio: false, descricao: 'Classificação detalhada do público-alvo', exemplo: 'B2C' }
+      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Nome ou título do segmento', exemplo: 'Informe o nome do segmento baseado em pesquisa real' },
+      { nome: 'variavel1', tipo: 'string', obrigatorio: false, descricao: '1ª Dimensão ou eixo de segmentação', exemplo: 'Informe a primeira dimensão de segmentação' },
+      { nome: 'variavel1Oposto', tipo: 'string', obrigatorio: false, descricao: 'Oposto da 1ª dimensão', exemplo: 'Informe o oposto da primeira dimensão' },
+      { nome: 'variavel2', tipo: 'string', obrigatorio: false, descricao: '2ª Dimensão ou comportamento', exemplo: 'Informe a segunda dimensão de comportamento' },
+      { nome: 'variavel2Oposto', tipo: 'string', obrigatorio: false, descricao: 'Oposto da 2ª dimensão', exemplo: 'Informe o oposto da segunda dimensão' },
+      { nome: 'segmento', tipo: 'string', obrigatorio: false, descricao: 'Classificação detalhada do público-alvo', exemplo: 'Informe a classificação do segmento' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Consumidores de Café Especial e Trabalho Remoto',
-      variavel1: 'Idade 22-38 anos com renda média-alta',
-      variavel1Oposto: 'Consumidores de commodities',
-      variavel2: 'Busca ambiente com Wi-Fi de alta velocidade e tomada',
-      variavel2Oposto: 'Apenas consumo rápido balcão',
-      segmento: 'B2C Premium'
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      variavel1: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      variavel1Oposto: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      variavel2: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      variavel2Oposto: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      segmento: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -56,25 +56,25 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'nome', tipo: 'string', obrigatorio: true, descricao: 'Nome fictício da persona', exemplo: 'Marina Souza' },
-      { nome: 'idade', tipo: 'string', obrigatorio: false, descricao: 'Idade da persona', exemplo: '29 anos' },
-      { nome: 'profissao', tipo: 'string', obrigatorio: false, descricao: 'Ocupação ou cargo', exemplo: 'Designer de Produto' },
-      { nome: 'escolaridade', tipo: 'string', obrigatorio: false, descricao: 'Nível de instrução', exemplo: 'Superior Completo' },
-      { nome: 'renda', tipo: 'string', obrigatorio: false, descricao: 'Renda média estimada', exemplo: 'R$ 6.500,00' },
-      { nome: 'habitos', tipo: 'string', obrigatorio: false, descricao: 'Comportamentos rotineiros', exemplo: 'Trabalha em cafeterias 3x por semana' },
-      { nome: 'dores', tipo: 'string', obrigatorio: false, descricao: 'Problemas e frustrações diárias', exemplo: 'Falta de cafés tranquilos com tomadas' },
-      { nome: 'objetivos', tipo: 'string', obrigatorio: false, descricao: 'Metas e desejos principais', exemplo: 'Encontrar um espaço inspirador e silencioso' }
+      { nome: 'nome', tipo: 'string', obrigatorio: true, descricao: 'Nome fictício da persona', exemplo: 'Informe o nome da persona baseado em pesquisa real' },
+      { nome: 'idade', tipo: 'string', obrigatorio: false, descricao: 'Idade da persona', exemplo: 'Informe a idade da persona' },
+      { nome: 'profissao', tipo: 'string', obrigatorio: false, descricao: 'Ocupação ou cargo', exemplo: 'Informe a profissão da persona' },
+      { nome: 'escolaridade', tipo: 'string', obrigatorio: false, descricao: 'Nível de instrução', exemplo: 'Informe o nível de instrução' },
+      { nome: 'renda', tipo: 'string', obrigatorio: false, descricao: 'Renda média estimada', exemplo: 'Informe a renda da persona' },
+      { nome: 'habitos', tipo: 'string', obrigatorio: false, descricao: 'Comportamentos rotineiros', exemplo: 'Informe os hábitos da persona' },
+      { nome: 'dores', tipo: 'string', obrigatorio: false, descricao: 'Problemas e frustrações diárias', exemplo: 'Informe as dores da persona' },
+      { nome: 'objetivos', tipo: 'string', obrigatorio: false, descricao: 'Metas e desejos principais', exemplo: 'Informe os objetivos da persona' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      nome: 'Lucas Mendes',
-      idade: '31 anos',
-      profissao: 'Engenheiro de Software Remoto',
-      escolaridade: 'Pós-graduação',
-      renda: 'R$ 12.000,00',
-      habitos: 'Consome cafés especiais, assina newsletters tech',
-      dores: 'Barulho excessivo em cafeterias comuns e conexão instável',
-      objetivos: 'Ter um local fixo para reuniões e trabalho focado com ótimo café'
+      nome: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      idade: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      profissao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      escolaridade: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      renda: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      habitos: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      dores: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      objetivos: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -97,19 +97,19 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'etapa', tipo: 'string', obrigatorio: true, descricao: 'Fase da jornada (Conhecimento, Consideração, Compra, Retenção)', exemplo: 'Descoberta' },
-      { nome: 'acoes', tipo: 'string', obrigatorio: true, descricao: 'O que o cliente faz nessa etapa', exemplo: 'Busca no Google Maps por cafés perto' },
-      { nome: 'pontosContato', tipo: 'string', obrigatorio: false, descricao: 'Canais de contato', exemplo: 'Instagram, Google Meu Negócio' },
-      { nome: 'emocoes', tipo: 'string', obrigatorio: false, descricao: 'Sentimento percebido', exemplo: 'Curioso, buscando confiança' },
-      { nome: 'oportunidadesMelhoria', tipo: 'string', obrigatorio: false, descricao: 'Ações que o negócio pode implementar', exemplo: 'Manter fotos atualizadas e cardápio online' }
+      { nome: 'etapa', tipo: 'string', obrigatorio: true, descricao: 'Fase da jornada (Conhecimento, Consideração, Compra, Retenção)', exemplo: 'Informe a fase da jornada' },
+      { nome: 'acoes', tipo: 'string', obrigatorio: true, descricao: 'O que o cliente faz nessa etapa', exemplo: 'Informe as ações do cliente nesta etapa' },
+      { nome: 'pontosContato', tipo: 'string', obrigatorio: false, descricao: 'Canais de contato', exemplo: 'Informe os pontos de contato' },
+      { nome: 'emocoes', tipo: 'string', obrigatorio: false, descricao: 'Sentimento percebido', exemplo: 'Informe o sentimento percebido' },
+      { nome: 'oportunidadesMelhoria', tipo: 'string', obrigatorio: false, descricao: 'Ações que o negócio pode implementar', exemplo: 'Informe as oportunidades de melhoria' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      etapa: 'Experiência no Estabelecimento',
-      acoes: 'Chega, pede pelo QR code na mesa, consome e trabalha por 3h',
-      pontosContato: 'Totem digital, atendimento no balcão, Wi-Fi com login simples',
-      emocoes: 'Satisfeito e produtivo',
-      oportunidadesMelhoria: 'Oferecer cartão fidelidade digital via WhatsApp'
+      etapa: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      acoes: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      pontosContato: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      emocoes: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      oportunidadesMelhoria: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -134,21 +134,21 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'tarefasCliente', tipo: 'string', obrigatorio: false, descricao: 'Tarefas que o cliente precisa realizar', exemplo: 'Trabalhar fora de casa e fazer reuniões' },
-      { nome: 'dores', tipo: 'string', obrigatorio: false, descricao: 'Dores evitadas', exemplo: 'Ruído alto, conexão instável, café frio' },
-      { nome: 'ganhos', tipo: 'string', obrigatorio: false, descricao: 'Ganhos desejados', exemplo: 'Produtividade, conforto ergonômico, sabor excepcional' },
-      { nome: 'produtosServicos', tipo: 'string', obrigatorio: false, descricao: 'Oferta concreta', exemplo: 'Coworking Café com cabines acústicas e baristas' },
-      { nome: 'aliviadoresDores', tipo: 'string', obrigatorio: false, descricao: 'Como a oferta elimina a dor', exemplo: 'Cabines com isolamento acústico e link redundante 500Mbps' },
-      { nome: 'criadoresGanhos', tipo: 'string', obrigatorio: false, descricao: 'Como a oferta gera benefícios extras', exemplo: 'Clube de assinatura com desconto e reserva garantida' }
+      { nome: 'tarefasCliente', tipo: 'string', obrigatorio: false, descricao: 'Tarefas que o cliente precisa realizar', exemplo: 'Informe as tarefas do cliente' },
+      { nome: 'dores', tipo: 'string', obrigatorio: false, descricao: 'Dores evitadas', exemplo: 'Informe as dores evitadas' },
+      { nome: 'ganhos', tipo: 'string', obrigatorio: false, descricao: 'Ganhos desejados', exemplo: 'Informe os ganhos desejados' },
+      { nome: 'produtosServicos', tipo: 'string', obrigatorio: false, descricao: 'Oferta concreta', exemplo: 'Informe a oferta concreta' },
+      { nome: 'aliviadoresDores', tipo: 'string', obrigatorio: false, descricao: 'Como a oferta elimina a dor', exemplo: 'Informe como a oferta elimina a dor' },
+      { nome: 'criadoresGanhos', tipo: 'string', obrigatorio: false, descricao: 'Como a oferta gera benefícios extras', exemplo: 'Informe como a oferta gera benefícios extras' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      tarefasCliente: 'Ter um local profissional para trabalhar com café gourmet',
-      dores: 'Espaços lotados e sem privacidade',
-      ganhos: 'Ambiente aconchegante e bebidas artesanais de alta qualidade',
-      produtosServicos: 'Cafeteria Especializada + Estações Individuais de Trabalho',
-      aliviadoresDores: 'Controle de volume sonoro e tomadas universais em todas as mesas',
-      criadoresGanhos: 'Torra própria de grãos e networking com profissionais'
+      tarefasCliente: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      dores: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      ganhos: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      produtosServicos: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      aliviadoresDores: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      criadoresGanhos: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -171,19 +171,19 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'nomeConcorrente', tipo: 'string', obrigatorio: true, descricao: 'Nome da empresa concorrente', exemplo: 'Cafeteria Central' },
-      { nome: 'pontosFortes', tipo: 'string', obrigatorio: false, descricao: 'Vantagens competitivas do concorrente', exemplo: 'Ponto tradicional e grande fluxo de pedestres' },
-      { nome: 'pontosFracos', tipo: 'string', obrigatorio: false, descricao: 'Desvantagens ou lacunas', exemplo: 'Grãos comerciais e sem tomadas para notebooks' },
-      { nome: 'preco', tipo: 'string', obrigatorio: false, descricao: 'Nível de preço relativo', exemplo: 'Médio' },
-      { nome: 'diferencial', tipo: 'string', obrigatorio: false, descricao: 'Nosso diferencial em relação a ele', exemplo: 'Cafés especiais microlote + ambiente focado para trabalho' }
+      { nome: 'nomeConcorrente', tipo: 'string', obrigatorio: true, descricao: 'Nome da empresa concorrente', exemplo: 'Informe o nome do concorrente' },
+      { nome: 'pontosFortes', tipo: 'string', obrigatorio: false, descricao: 'Vantagens competitivas do concorrente', exemplo: 'Informe os pontos fortes do concorrente' },
+      { nome: 'pontosFracos', tipo: 'string', obrigatorio: false, descricao: 'Desvantagens ou lacunas', exemplo: 'Informe as desvantagens ou lacunas' },
+      { nome: 'preco', tipo: 'string', obrigatorio: false, descricao: 'Nível de preço relativo', exemplo: 'Informe o nível de preço relativo' },
+      { nome: 'diferencial', tipo: 'string', obrigatorio: false, descricao: 'Nosso diferencial em relação a ele', exemplo: 'Informe o diferencial em relação ao concorrente' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      nomeConcorrente: 'Starbucks Shopping',
-      pontosFortes: 'Força de marca global e padronização',
-      pontosFracos: 'Ambiente barulhento e café com perfil industrial',
-      preco: 'Alto',
-      diferencial: 'Experiência sensorial artesanal, método v60/aeropress e assentos ergonômicos'
+      nomeConcorrente: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      pontosFortes: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      pontosFracos: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      preco: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      diferencial: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -208,15 +208,15 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'tipo', tipo: 'string', obrigatorio: true, descricao: 'Classificação: "forca" ou "fraqueza"', exemplo: 'forca' },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Detalhamento do ponto interno', exemplo: 'Baristas certificados e maquinário italiano de ponta' },
-      { nome: 'grauImportancia', tipo: 'string', obrigatorio: false, descricao: 'Nível de relevância: Alta, Média ou Baixa', exemplo: 'Alta' }
+      { nome: 'tipo', tipo: 'string', obrigatorio: true, descricao: 'Classificação: "forca" ou "fraqueza"', exemplo: 'Informe se é força ou fraqueza' },
+      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Detalhamento do ponto interno', exemplo: 'Informe o detalhe do ponto interno' },
+      { nome: 'grauImportancia', tipo: 'string', obrigatorio: false, descricao: 'Nível de relevância: Alta, Média ou Baixa', exemplo: 'Informe o nível de importância' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      tipo: 'forca',
-      descricao: 'Parceria direta com produtores de cafés premiados do Sul de Minas',
-      grauImportancia: 'Alta'
+      tipo: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      grauImportancia: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -239,15 +239,15 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'tipo', tipo: 'string', obrigatorio: true, descricao: 'Classificação: "oportunidade" ou "ameaca"', exemplo: 'oportunidade' },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Fator externo não controlável', exemplo: 'Crescimento de 35% no trabalho híbrido na região' },
-      { nome: 'impacto', tipo: 'string', obrigatorio: false, descricao: 'Impacto potencial no negócio', exemplo: 'Alto' }
+      { nome: 'tipo', tipo: 'string', obrigatorio: true, descricao: 'Classificação: "oportunidade" ou "ameaca"', exemplo: 'Informe se é oportunidade ou ameaça' },
+      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Fator externo não controlável', exemplo: 'Informe o fator externo' },
+      { nome: 'impacto', tipo: 'string', obrigatorio: false, descricao: 'Impacto potencial no negócio', exemplo: 'Informe o impacto potencial' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      tipo: 'oportunidade',
-      descricao: 'Aumento na busca por cafés especiais e grãos moídos na hora para viagem',
-      impacto: 'Alto'
+      tipo: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      impacto: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -270,14 +270,15 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'estrategiaDesenvolvimento', tipo: 'string', obrigatorio: false, descricao: 'Ações de Forças + Oportunidades', exemplo: 'Lançar plano mensal para nômades digitais' },
-      { nome: 'estrategiaManutencao', tipo: 'string', obrigatorio: false, descricao: 'Ações de Forças + Ameaças', exemplo: 'Contrato de fornecimento de grãos de longo prazo' },
-      { nome: 'estrategiaSobrevivencia', tipo: 'string', obrigatorio: false, descricao: 'Ações de Fraquezas + Ameaças', exemplo: 'Manter controle rigoroso de perdas de perecíveis' }
+      { nome: 'estrategiaDesenvolvimento', tipo: 'string', obrigatorio: false, descricao: 'Ações de Forças + Oportunidades', exemplo: 'Informe a estratégia de desenvolvimento' },
+      { nome: 'estrategiaManutencao', tipo: 'string', obrigatorio: false, descricao: 'Ações de Forças + Ameaças', exemplo: 'Informe a estratégia de manutenção' },
+      { nome: 'estrategiaSobrevivencia', tipo: 'string', obrigatorio: false, descricao: 'Ações de Fraquezas + Ameaças', exemplo: 'Informe a estratégia de sobrevivência' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      estrategiaDesenvolvimento: 'Aproveitar a equipe qualificada para ministrar workshops de café aos fins de semana',
-      estrategiaManutencao: 'Criar promoções matinais para manter fluxo antes do horário comercial'
+      estrategiaDesenvolvimento: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      estrategiaManutencao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      estrategiaSobrevivencia: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -302,17 +303,17 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Item de investimento', exemplo: 'Máquina de Espresso Profissional 2 Grupos' },
-      { nome: 'quantidade', tipo: 'number', obrigatorio: true, descricao: 'Quantidade a adquirir', exemplo: 1 },
-      { nome: 'valorUnitario', tipo: 'number', obrigatorio: true, descricao: 'Valor unitário em R$', exemplo: 25000 },
-      { nome: 'subtotal', tipo: 'number', obrigatorio: false, descricao: 'Subtotal calculado', exemplo: 25000 }
+      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Item de investimento', exemplo: 'Informe o item de investimento' },
+      { nome: 'quantidade', tipo: 'number', obrigatorio: true, descricao: 'Quantidade a adquirir', exemplo: 'Informe a quantidade' },
+      { nome: 'valorUnitario', tipo: 'number', obrigatorio: true, descricao: 'Valor unitário em R$', exemplo: 'Informe o valor unitário' },
+      { nome: 'subtotal', tipo: 'number', obrigatorio: false, descricao: 'Subtotal calculado', exemplo: 'Informe o subtotal' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Moinho de Grãos Sob Demanda Mahlkönig',
-      quantidade: 2,
-      valorUnitario: 8500,
-      subtotal: 17000
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      quantidade: 0,
+      valorUnitario: 0,
+      subtotal: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -334,14 +335,13 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     statusDescoberta: 'validado_direto',
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
-      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Tipo de despesa pré-operacional', exemplo: 'Reforma acústica e elétrica do salão' },
-      { nome: 'valor', tipo: 'number', obrigatorio: true, descricao: 'Valor total do gasto em R$', exemplo: 32000 }
+      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'Tipo de despesa pré-operacional', exemplo: 'Informe o tipo de despesa pré-operacional' },
+      { nome: 'valor', tipo: 'number', obrigatorio: true, descricao: 'Valor total do gasto em R$', exemplo: 'Informe o valor total' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Abertura de empresa, alvarás e projeto de bombeiros',
-      valor: 4500
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      valor: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -363,16 +363,15 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     statusDescoberta: 'validado_direto',
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
-      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Mercadoria ou insumo inicial', exemplo: 'Grãos de Café Especial Catuaí Amarelo (kg)' },
-      { nome: 'quantidade', tipo: 'number', obrigatorio: true, descricao: 'Quantidade inicial', exemplo: 50 },
-      { nome: 'valorUnitario', tipo: 'number', obrigatorio: true, descricao: 'Custo unitário em R$', exemplo: 75 }
+      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'Mercadoria ou insumo inicial', exemplo: 'Informe o insumo inicial' },
+      { nome: 'quantidade', tipo: 'number', obrigatorio: true, descricao: 'Quantidade inicial', exemplo: 'Informe a quantidade inicial' },
+      { nome: 'valorUnitario', tipo: 'number', obrigatorio: true, descricao: 'Custo unitário em R$', exemplo: 'Informe o custo unitário' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Copos ecológicos e embalagens biodegradáveis',
-      quantidade: 1000,
-      valorUnitario: 1.8
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      quantidade: 0,
+      valorUnitario: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -395,15 +394,15 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'prazoMedioVendas', tipo: 'number', obrigatorio: false, descricao: 'Prazo médio em dias para receber vendas', exemplo: 5 },
-      { nome: 'prazoMedioCompras', tipo: 'number', obrigatorio: false, descricao: 'Prazo médio em dias para pagar fornecedores', exemplo: 28 },
-      { nome: 'reservaFinanceira', tipo: 'number', obrigatorio: false, descricao: 'Valor da reserva em R$', exemplo: 20000 }
+      { nome: 'prazoMedioVendas', tipo: 'number', obrigatorio: false, descricao: 'Prazo médio em dias para receber vendas', exemplo: 'Informe o prazo médio de vendas' },
+      { nome: 'prazoMedioCompras', tipo: 'number', obrigatorio: false, descricao: 'Prazo médio em dias para pagar fornecedores', exemplo: 'Informe o prazo médio de compras' },
+      { nome: 'reservaFinanceira', tipo: 'number', obrigatorio: false, descricao: 'Valor da reserva em R$', exemplo: 'Informe o valor da reserva financeira' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      prazoMedioVendas: 7,
-      prazoMedioCompras: 30,
-      reservaFinanceira: 25000
+      prazoMedioVendas: 0,
+      prazoMedioCompras: 0,
+      reservaFinanceira: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -425,14 +424,13 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     statusDescoberta: 'validado_direto',
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
-      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Nome do custo fixo', exemplo: 'Aluguel do Ponto Comercial + IPTU' },
-      { nome: 'valor', tipo: 'number', obrigatorio: true, descricao: 'Valor mensal em R$', exemplo: 4500 }
+      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'Nome do custo fixo', exemplo: 'Informe o nome do custo fixo' },
+      { nome: 'valor', tipo: 'number', obrigatorio: true, descricao: 'Valor mensal em R$', exemplo: 'Informe o valor mensal' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Internet Fibra Dedicada 600MB + Link de Backup',
-      valor: 450
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      valor: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -454,18 +452,17 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     statusDescoberta: 'validado_direto',
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
-      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Nome do produto/serviço', exemplo: 'Café Filtrado Especial V60 (300ml)' },
-      { nome: 'precoVenda', tipo: 'number', obrigatorio: true, descricao: 'Preço de venda em R$', exemplo: 16.5 },
-      { nome: 'custoUnitario', tipo: 'number', obrigatorio: false, descricao: 'Custo dos materiais em R$', exemplo: 4.2 },
-      { nome: 'estimativaVendasMes', tipo: 'number', obrigatorio: false, descricao: 'Quantidade mensal projetada', exemplo: 850 }
+      { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'Nome do produto/serviço', exemplo: 'Informe o nome do produto/serviço' },
+      { nome: 'precoVenda', tipo: 'number', obrigatorio: true, descricao: 'Preço de venda em R$', exemplo: 'Informe o preço de venda' },
+      { nome: 'custoUnitario', tipo: 'number', obrigatorio: false, descricao: 'Custo dos materiais em R$', exemplo: 'Informe o custo unitário' },
+      { nome: 'estimativaVendasMes', tipo: 'number', obrigatorio: false, descricao: 'Quantidade mensal projetada', exemplo: 'Informe a quantidade mensal projetada' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Combo Diária Coworking + 2 Cafés Especiais',
-      precoVenda: 45,
-      custoUnitario: 8.5,
-      estimativaVendasMes: 220
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      precoVenda: 0,
+      custoUnitario: 0,
+      estimativaVendasMes: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -490,17 +487,17 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Hipótese a validar (máx 200 caracteres)', exemplo: 'Clientes remotos pagam R$ 45 por dia por internet ultra-rápida e café livre' },
-      { nome: 'categoria', tipo: 'string', obrigatorio: false, descricao: 'Cliente, Problema ou Solução', exemplo: 'Solução' },
-      { nome: 'nivelIncerteza', tipo: 'string', obrigatorio: false, descricao: 'Baixo, Médio ou Alto', exemplo: 'Médio' },
-      { nome: 'nivelImportancia', tipo: 'string', obrigatorio: false, descricao: 'Importância para viabilidade', exemplo: 'Alta' }
+      { nome: 'descricao', tipo: 'string', obrigatorio: true, descricao: 'Hipótese a validar (máx 200 caracteres)', exemplo: 'Informe a hipótese a validar' },
+      { nome: 'categoria', tipo: 'string', obrigatorio: false, descricao: 'Cliente, Problema ou Solução', exemplo: 'Informe a categoria' },
+      { nome: 'nivelIncerteza', tipo: 'string', obrigatorio: false, descricao: 'Baixo, Médio ou Alto', exemplo: 'Informe o nível de incerteza' },
+      { nome: 'nivelImportancia', tipo: 'string', obrigatorio: false, descricao: 'Importância para viabilidade', exemplo: 'Informe o nível de importância' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      descricao: 'Pelo menos 40% dos clientes compram pacotes de grãos moídos após consumir na loja',
-      categoria: 'Cliente',
-      nivelIncerteza: 'Alto',
-      nivelImportancia: 'Alta'
+      descricao: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      categoria: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      nivelIncerteza: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      nivelImportancia: 'EXEMPLO: Substituir com dados reais da pesquisa'
     },
     respostaEsperada: {
       msg: 'result',
@@ -523,17 +520,17 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     suportaExecucaoSemRenderizacao: true,
     camposSchema: [
       { nome: 'idPlano', tipo: 'string', obrigatorio: true, descricao: 'ID do plano', exemplo: ID_PLANO_PADRAO },
-      { nome: 'nome', tipo: 'string', obrigatorio: true, descricao: 'Nome da campanha ou canal', exemplo: 'Tráfego Local Instagram Ads' },
-      { nome: 'orcamento', tipo: 'number', obrigatorio: false, descricao: 'Investimento em R$', exemplo: 1200 },
-      { nome: 'qtdPessoasAlcancadas', tipo: 'number', obrigatorio: false, descricao: 'Alcance topo de funil', exemplo: 15000 },
-      { nome: 'qtdPessoasChamadas', tipo: 'number', obrigatorio: false, descricao: 'Cliques ou conversões meio de funil', exemplo: 480 }
+      { nome: 'nome', tipo: 'string', obrigatorio: true, descricao: 'Nome da campanha ou canal', exemplo: 'Informe o nome da campanha ou canal' },
+      { nome: 'orcamento', tipo: 'number', obrigatorio: false, descricao: 'Investimento em R$', exemplo: 'Informe o investimento' },
+      { nome: 'qtdPessoasAlcancadas', tipo: 'number', obrigatorio: false, descricao: 'Alcance topo de funil', exemplo: 'Informe o alcance topo de funil' },
+      { nome: 'qtdPessoasChamadas', tipo: 'number', obrigatorio: false, descricao: 'Cliques ou conversões meio de funil', exemplo: 'Informe as conversões meio de funil' }
     ],
     exemploPayload: {
       idPlano: ID_PLANO_PADRAO,
-      nome: 'Google Search "Cafeteria Coworking Perto"',
-      orcamento: 800,
-      qtdPessoasAlcancadas: 3200,
-      qtdPessoasChamadas: 310
+      nome: 'EXEMPLO: Substituir com dados reais da pesquisa',
+      orcamento: 0,
+      qtdPessoasAlcancadas: 0,
+      qtdPessoasChamdas: 0
     },
     respostaEsperada: {
       msg: 'result',
@@ -542,3 +539,4 @@ export const FERRAMENTAS_PNBOX: FerramentaInfo[] = [
     }
   }
 ];
+

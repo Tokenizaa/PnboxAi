@@ -200,11 +200,7 @@ RETORNE ESTRITAMENTE UM JSON VÁLIDO no seguinte formato (sem blocos de texto ex
 `;
 
   let responseText = '';
-  let fontesPesquisa: Array<{ titulo: string; uri: string }> = [
-    { titulo: 'Sebrae Nacional - Ideias de Negócios & Estudos de Mercado', uri: 'https://sebrae.com.br/sites/PortalSebrae/ideiasdenegocios' },
-    { titulo: 'IBGE - Pesquisa Anual de Serviços e Comércio', uri: 'https://www.ibge.gov.br' },
-    { titulo: 'Portal do Empreendedor - CNAE & Enquadramento', uri: 'https://www.gov.br/empresas-e-negocios/pt-br/empreendedor' }
-  ];
+  let fontesPesquisa: Array<{ titulo: string; uri: string }> = [];
 
   if (provider === 'nvidia') {
     const nvidiaKey = options.nvidiaApiKey || getNvidiaApiKey(options.nvidiaAccountSlot || 1);
@@ -280,54 +276,23 @@ RETORNE ESTRITAMENTE UM JSON VÁLIDO no seguinte formato (sem blocos de texto ex
     }
   }
 
-  // Fallback estruturado de alta fidelidade
+  // Se IA falhou em retornar JSON válido, lançar erro explícito - NÃO gerar dados fake
   if (!parsed || !parsed.nomeNegocioSugerido) {
-    parsed = {
-      nomeNegocioSugerido: promptNegocio.length > 30 ? `${promptNegocio.substring(0, 25)} & Cia` : `${promptNegocio} Hub`,
-      setor: 'Serviços Especializados & Comércio',
-      cidadeUf,
-      resumoExecutivo: `Empreendimento estruturado para atuar no segmento de ${promptNegocio} em ${cidadeUf}. O modelo de negócio alia excelência operacional, atendimento personalizado e forte presença digital para capturar a demanda latente do mercado regional.`,
-      oportunidadeMercado: `O mercado brasileiro de ${promptNegocio} apresenta crescimento acelerado impulsionado por digitalização, conveniência e demanda por serviços qualificados com alto índice de recomendação.`,
-      tendencias2025_2026: [
-        'Hiperpersonalização do atendimento via inteligência artificial e canais conversacionais',
-        'Modelos de receita recorrente e clubes de assinatura fidelizados',
-        'Práticas ESG e sustentabilidade como fator decisivo de escolha pelo consumidor',
-        'Integração omnichannel entre canais físicos e digitais'
-      ],
-      concorrentesMapeados: [
-        {
-          nome: 'Líder Regional Tradicional',
-          pontosFortes: 'Forte presença física e carteira histórica de clientes',
-          pontosFracos: 'Pouca flexibilidade digital e atendimento burocrático',
-          diferenciacao: 'Atendimento ágil, agendamento 100% online e suporte via WhatsApp em tempo real'
-        },
-        {
-          nome: 'Operações de Baixo Custo / Low Cost',
-          pontosFortes: 'Preços agressivos no mercado',
-          pontosFracos: 'Baixa personalização e suporte pós-venda insatisfatório',
-          diferenciacao: 'Experiência premium com excelente relação custo-benefício e garantia de qualidade'
-        }
-      ],
-      buyerPersona: {
-        nome: 'Mariana Silva',
-        idade: '28 a 45 anos',
-        perfil: 'Consumidora exigente, conectada e que valoriza tempo e qualidade',
-        dores: ['Dificuldade em encontrar serviços pontuais e confiáveis', 'Processos burocráticos de contratação'],
-        desejos: ['Atendimento rápido, transparente e com alto padrão técnico'],
-        ticketMedio: 190
-      },
-      investimentoEstimado: {
-        capexTotal: orcamentoEstimado || 85000,
-        opexMensal: Math.round((orcamentoEstimado || 85000) * 0.25),
-        pontoEquilibrioMeses: 12,
-        faturamentoEstimadoMensal: Math.round((orcamentoEstimado || 85000) * 0.45)
-      },
-      aspectosLegaisTributarios: {
-        cnaeSugerido: 'CNAE Principal e Secundários',
-        regimeTributario: 'Simples Nacional',
-        licencasExigidas: ['Alvará de Funcionamento', 'Vigilância Sanitária', 'AVCB Bombeiros']
-      }
-    };
+    throw new Error(
+      `[AI Deep Research] Falha ao obter resposta válida da IA (provider: ${provider}). ` +
+      `Resposta recebida: ${responseText.substring(0, 500)}... ` +
+      `Não é permitido gerar dados fictícios como fallback. Verifique a chave de API e tente novamente.`
+    );
+  }
+
+  // Validar que fontes de pesquisa reais foram obtidas (nao apenas as hardcoded)
+  const realSources = fontesPesquisa.filter((f) =>
+    f.uri.includes('google.com') ||
+    f.uri.includes('ibge.gov') ||
+    f.uri.includes('sebrae.com') || f.uri.includes('.gov.br')
+  );
+  if (realSources.length === 0 && provider !== 'nvidia') {
+    console.warn('[AI Deep Research] Nenhuma fonte de pesquisa real detectada na resposta');
   }
 
   return {

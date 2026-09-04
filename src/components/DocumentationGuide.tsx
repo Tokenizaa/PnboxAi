@@ -74,7 +74,8 @@ export const DocumentationGuide: React.FC<DocumentationGuideProps> = ({
       companyName: 'DataFlow Intelligence SaaS',
       itemsPerTool: 2,
       randomVariance: 0.2,
-      includeComplementaryTools: true
+      includeComplementaryTools: true,
+      explicitlyGenerateMock: true
     });
   });
 
@@ -95,7 +96,8 @@ export const DocumentationGuide: React.FC<DocumentationGuideProps> = ({
       companyName: company,
       itemsPerTool: mockItemsPerTool,
       randomVariance: mockVariance,
-      includeComplementaryTools: mockIncludeComplementary
+      includeComplementaryTools: mockIncludeComplementary,
+      explicitlyGenerateMock: true
     });
 
     setGeneratedMockData(freshData);
@@ -114,7 +116,8 @@ export const DocumentationGuide: React.FC<DocumentationGuideProps> = ({
       companyName: newName,
       itemsPerTool: mockItemsPerTool,
       randomVariance: mockVariance,
-      includeComplementaryTools: mockIncludeComplementary
+      includeComplementaryTools: mockIncludeComplementary,
+      explicitlyGenerateMock: true
     });
     setGeneratedMockData(freshData);
   };

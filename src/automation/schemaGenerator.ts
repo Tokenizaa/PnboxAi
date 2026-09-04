@@ -66,6 +66,7 @@ export interface GenerateMockOptions {
   randomVariance?: number; // 0.0 (estático) a 1.0 (alta variação)
   selectedToolIds?: string[];
   includeComplementaryTools?: boolean;
+  explicitlyGenerateMock?: boolean; // DEVE ser true para gerar mock data; false/undefined retorna arrays vazios
 }
 
 export interface SchemaValidationResult {

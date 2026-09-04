@@ -17,9 +17,13 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { execSync } from 'child_process';
 import { OidcLoginResult } from './oidcPnboxAuth';
+import { PnboxConnectionStep } from './connectionJob';
 
 const KEYCLOAK_BASE = 'https://amei.sebrae.com.br';
 const PNBOX_BASE = 'https://pnbox.sebrae.com.br';
+
+/** Callback para reportar progresso real da autenticação */
+export type PnboxProgressCallback = (step: PnboxConnectionStep) => void;
 
 const CHROMIUM_LAUNCH_ARGS = [
   '--disable-blink-features=AutomationControlled',
@@ -67,18 +71,25 @@ async function launchChromiumSafely(): Promise<Browser> {
  *
  * @param cpf CPF do titular da conta
  * @param password Senha do titular
+ * @param onProgress Callback para emitir eventos de progresso reais
  * @returns Resultado com cookies PNBOX formatados para WebSocket
  */
 export async function pnboxOidcLoginViaPlaywright(
   cpf: string,
-  password: string
+  password: string,
+  onProgress?: PnboxProgressCallback
 ): Promise<OidcLoginResult> {
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let page: Page | null = null;
 
+  const report = (step: PnboxConnectionStep) => {
+    if (onProgress) onProgress(step);
+  };
+
   try {
     console.log('[OIDC/Playwright] Iniciando Chromium headless...');
+    report('initializing');
     browser = await launchChromiumSafely();
 
     context = await browser.newContext({
@@ -97,6 +108,7 @@ export async function pnboxOidcLoginViaPlaywright(
 
     // ETAPA 1: Navegar para PNBOX → redireciona para Keycloak
     console.log('[OIDC/Playwright] Navegando para PNBOX...');
+    report('opening_pnbox');
     await page.goto(PNBOX_BASE + '/', {
       waitUntil: 'load',
       timeout: 35000
@@ -107,6 +119,7 @@ export async function pnboxOidcLoginViaPlaywright(
     // Se ainda está no PNBOX (não redirecionou direto), aguardar o botão Entrar do React/MUI
     if (urlAposGoto.includes('pnbox.sebrae.com.br') && !urlAposGoto.includes('login') && !urlAposGoto.includes('amei')) {
       console.log('[OIDC/Playwright] Aguardando botão "Entrar" renderizar...');
+      report('waiting_login');
       try {
         await page.waitForSelector('button:has-text("Entrar")', {
           timeout: 15000,
@@ -131,12 +144,14 @@ export async function pnboxOidcLoginViaPlaywright(
 
     // Aguardar formulário de login do Keycloak
     console.log('[OIDC/Playwright] Aguardando tela de login SSO...');
+    report('waiting_login');
     try {
       await page.waitForSelector('input[name="username"], input#username', {
         timeout: 25000,
         state: 'visible'
       });
       console.log('[OIDC/Playwright] Form de login SSO detectado!');
+      report('login_detected');
     } catch (e) {
       const debugPath = `/tmp/pnbox-debug-${Date.now()}.png`;
       await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
@@ -149,6 +164,7 @@ export async function pnboxOidcLoginViaPlaywright(
 
     // ETAPA 2: Preencher credenciais
     console.log(`[OIDC/Playwright] Preenchendo CPF (3 primeiros dígitos): ${cpf.substring(0, 3)}***`);
+    report('submitting_credentials');
     await page.fill('input[name="username"], input#username', cpf);
     await page.fill('input[name="password"], input#password', password);
 
@@ -160,34 +176,56 @@ export async function pnboxOidcLoginViaPlaywright(
 
     // ETAPA 3: Submeter formulário
     console.log('[OIDC/Playwright] Submetendo formulário de login...');
+    report('authenticating');
     const submitBtn = page.locator('input[name="login"], button[name="login"], #kc-login, button[type="submit"], input[type="submit"]').first();
     await submitBtn.click();
 
-    // Aguardar redirecionamento de volta ao PNBOX ou erro no Keycloak
-    await page.waitForURL(
-      (url) => {
-        const u = url.toString();
-        return u.includes('pnbox.sebrae.com.br') || u.includes('/login-actions/') || u.includes('error');
-      },
-      { timeout: 30000 }
-    ).catch(() => {});
+    // ETAPA 4: Aguardar retorno ao PNBOX. Sucesso = URL dentro do PNBOX.
+    // Sem desistir por URL ainda no Keycloak — redirect pode demorar.
+    const deadline = Date.now() + 45000;
+    let urlAposLogin = page.url();
+    let authError: string | null = null;
+    while (Date.now() < deadline) {
+      urlAposLogin = page.url();
 
-    // ETAPA 4: Verificar se login teve sucesso
-    const urlAposLogin = page.url();
-    console.log(`[OIDC/Playwright] URL após login: ${urlAposLogin.substring(0, 80)}...`);
+      // Sucesso: chegou no PNBOX
+      if (urlAposLogin.includes('pnbox.sebrae.com.br')) {
+        console.log(`[OIDC/Playwright] Login OK — URL após login: ${urlAposLogin.substring(0, 80)}...`);
+        break;
+      }
 
-    // Se ainda está no Keycloak, capturar erro
-    if (urlAposLogin.includes('amei.sebrae.com.br') &&
-        (urlAposLogin.includes('/login') || urlAposLogin.includes('login-actions') || urlAposLogin.includes('protocol/openid-connect'))) {
-      const errorMsg = await page.locator('.kc-feedback-text, .alert-error, #input-error, .instruction, .alert')
-        .first()
-        .textContent()
-        .catch(() => null);
-      const cleanError = errorMsg?.trim() || 'Usuário ou senha incorretos no Sebrae ID.';
-      throw new Error(`[Sebrae ID] ${cleanError}`);
+      // Erro REAL de credencial: seletor de erro visível no Keycloak
+      if (urlAposLogin.includes('amei.sebrae.com.br')) {
+        const errLocs = page.locator(
+          '.kc-feedback-text, .alert-error, #input-error, .alert, .alert-error, .error, .kc-form-error'
+        );
+        if (await errLocs.first().isVisible().catch(() => false)) {
+          authError = (await errLocs.first().textContent().catch(() => null))?.trim() || null;
+          if (authError) {
+            console.error(`[OIDC/Playwright] Erro real do Sebrae ID: ${authError}`);
+            break;
+          }
+        }
+      }
+
+      await page.waitForTimeout(1000);
+    }
+
+    // Se desistimos sem sucesso nem erro de credencial → timeout de redirect
+    if (!urlAposLogin.includes('pnbox.sebrae.com.br') && !authError) {
+      const debugPath = `/tmp/pnbox-auth-timeout-${Date.now()}.png`;
+      await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
+      console.error(`[OIDC/Playwright] Redirect ao PNBOX não completou. URL final: ${urlAposLogin.substring(0, 120)}. Screenshot: ${debugPath}`);
+      throw new Error(`[OIDC/Playwright] O redirecionamento ao PNBOX após o login não completou em tempo hábil (${urlAposLogin.substring(0, 80)}).`);
+    }
+
+    // Erro de credencial confirmado
+    if (authError) {
+      throw new Error(`[Sebrae ID] ${authError}`);
     }
 
     // ETAPA 5: Aguardar PNBOX carregar e armazenar tokens Meteor
+    report('obtaining_session');
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
     // ETAPA 6: Extrair tokens Meteor do localStorage ou memória
@@ -198,12 +236,16 @@ export async function pnboxOidcLoginViaPlaywright(
       xMtok: ''
     };
 
+    // Esperar app PNBOX inicializar e popular Meteor (pode demorar após redirect)
     const startExtractTime = Date.now();
-    while (Date.now() - startExtractTime < 15000) {
+    while (Date.now() - startExtractTime < 30000) {
       const extracted = await page.evaluate(() => {
-        const tok = localStorage.getItem('Meteor.loginToken') || (window as any).Meteor?.default_connection?._loginToken;
-        const uId = localStorage.getItem('Meteor.userId') || (window as any).Meteor?.userId?.();
-        const exp = localStorage.getItem('Meteor.loginTokenExpires');
+        const storage = (() => {
+          try { return localStorage; } catch { return null; }
+        })();
+        const tok = storage?.getItem('Meteor.loginToken') || (window as any).Meteor?.default_connection?._loginToken;
+        const uId = storage?.getItem('Meteor.userId') || (window as any).Meteor?.userId?.();
+        const exp = storage?.getItem('Meteor.loginTokenExpires');
         const xMtok = document.cookie.split('; ').find(c => c.startsWith('x_mtok='))?.split('=')[1] || '';
         return { loginToken: tok || null, userId: uId || null, loginTokenExpires: exp || null, xMtok };
       }).catch(() => null);
@@ -212,11 +254,18 @@ export async function pnboxOidcLoginViaPlaywright(
         meteorData = extracted;
         break;
       }
-      await page.waitForTimeout(500);
+      // Recarregar se Meteor ainda não inicializou (SPA pode precisar de reload)
+      if (Date.now() - startExtractTime > 12000 && !/pnbox\.sebrae\.com\.br\/?$/.test(page.url())) {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      }
+      await page.waitForTimeout(800);
     }
 
     if (!meteorData.loginToken || !meteorData.userId) {
-      throw new Error('[OIDC/Playwright] Sessão retornou do Sebrae ID mas o token Meteor não foi encontrado no navegador.');
+      const debugPath = `/tmp/pnbox-notoken-${Date.now()}.png`;
+      await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
+      console.error(`[OIDC/Playwright] Token Meteor não encontrado após 30s. URL: ${page.url()}. Screenshot: ${debugPath}`);
+      throw new Error(`[OIDC/Playwright] O login no Sebrae ID foi validado, mas a sessão do PNBOX não foi obtida no navegador. URL final: ${page.url().substring(0, 80)}.`);
     }
 
     console.log(`[OIDC/Playwright] Meteor tokens capturados com sucesso: userId=${meteorData.userId}`);

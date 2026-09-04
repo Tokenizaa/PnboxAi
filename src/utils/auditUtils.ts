@@ -1,6 +1,6 @@
 import { FERRAMENTAS_PNBOX } from '../automation/schemaCatalog';
 import { PlanAuditReport, ToolAuditStatus, FerramentaInfo, InterceptedTrafficEvent } from '../types/pnbox';
-import { SchemaGenerator } from './schemaGenerator';
+import { SchemaGenerator, BusinessArchetypeId } from './schemaGenerator';
 
 const STORAGE_AUDIT_KEY = 'pnbox_plan_audit_cache';
 
@@ -118,15 +118,29 @@ export class PlanAuditManager {
     return report;
   }
 
-  /**
-   * Sincroniza todas as ferramentas pendentes com dados realistas gerados pelo SchemaGenerator
-   */
+/**
+ * Sincroniza todas as ferramentas pendentes com dados realistas gerados pelo SchemaGenerator
+ */
   static gerarPayloadsParaPendentes(
     report: PlanAuditReport,
     idPlano: string,
-    templateId: string = 'cafeteria_coworking'
+    templateId: string = 'cafeteria_gastronomia'
   ): Record<string, Record<string, unknown>[]> {
-    const todosDados = SchemaGenerator.generateForTemplate(templateId, idPlano);
+    // Validar se o templateId é um arquétipo válido, senão usar padrão
+    const validArchetypes: BusinessArchetypeId[] = [
+      'tecnologia_saas', 'cafeteria_gastronomia', 'saude_odontologia', 'barbearia_estetica', 
+      'educacao_edtech', 'varejo_sustentavel', 'consultoria_agencia', 'energia_solar', 
+      'fitness_academia', 'logistica_frotas', 'random'
+    ];
+    const validArchetypeId: BusinessArchetypeId = validArchetypes.includes(templateId as BusinessArchetypeId) 
+      ? (templateId as BusinessArchetypeId) 
+      : 'cafeteria_gastronomia';
+    
+    const template = SchemaGenerator.generateBusinessTemplate({
+      idPlano,
+      archetype: validArchetypeId
+    });
+    const todosDados = template.dados;
     const dadosPendentes: Record<string, Record<string, unknown>[]> = {};
 
     for (const f of report.ferramentas) {

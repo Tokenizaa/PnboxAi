@@ -5,7 +5,7 @@ import { PnboxToolsMatrix } from './components/pnbox/PnboxToolsMatrix';
 import { PnboxToolDetailView } from './components/pnbox/PnboxToolDetailView';
 import { PnboxAiCopilotDrawer } from './components/pnbox/PnboxAiCopilotDrawer';
 import { PnboxCreatePlanModal } from './components/pnbox/PnboxCreatePlanModal';
-import { PnboxBackendSettingsModal } from './components/pnbox/PnboxBackendSettingsModal';
+import { PnboxConnectionTimeline } from './components/pnbox/PnboxConnectionTimeline';
 import { Toast, ToastMessage } from './components/Toast';
 import {
   AuthSessionState,
@@ -143,8 +143,11 @@ export function App() {
   // Carregar dados iniciais do servidor
   const carregarDados = useCallback(async () => {
     try {
+      const token = platformToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
       // 1. Status de Autenticação
-      const resAuth = await fetch('/api/automation/auth/status');
+      const resAuth = await fetch('/api/automation/auth/status', { headers });
       if (resAuth.ok) {
         const dataAuth = await resAuth.json();
         if (dataAuth.session) {
@@ -156,7 +159,7 @@ export function App() {
       }
 
       // 2. Tráfego de Rede DDP
-      const resTraffic = await fetch('/api/automation/traffic');
+      const resTraffic = await fetch('/api/automation/traffic', { headers });
       if (resTraffic.ok) {
         const dataTraffic = await resTraffic.json();
         if (dataTraffic.eventos) {
@@ -303,13 +306,18 @@ export function App() {
         planoAtivo.idPlano
       );
 
-      const res = await fetch('/api/automation/run-official-batch', {
+      const token = platformToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch('/api/automation/fill-batch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
+          templateId: 'defesai_adeus_multas',
           idPlano: planoAtivo.idPlano,
           dados: dadosParaEnviar,
-          templateId: 'defesai_adeus_multas'
+          modoExecucao: authSession.modoExecucao
         })
       });
 
@@ -542,19 +550,60 @@ export function App() {
         authSession={authSession}
       />
 
-      {/* 5. Modal Discreto de Diagnóstico & Backend (Credenciais, DDP, Tráfego) */}
-      <PnboxBackendSettingsModal
+      {/* 5. Modal de Conexão PNBOX (Timeline de Progresso) */}
+      <PnboxConnectionTimeline
         isOpen={showBackendModal}
-        onClose={() => setShowBackendModal(false)}
-        authSession={authSession}
-        ferramentas={ferramentas}
-        eventosTrafego={eventosTrafego}
-        onOpenAuthModal={() => {
-          setShowBackendModal(false);
-          setShowBackendModal(true);
+        onConnected={(job) => {
+          setAuthSession((prev) => ({
+            ...prev,
+            status: 'authenticated',
+            isExpired: false,
+            isOnline: true,
+            logs: [
+              {
+                timestamp: new Date().toISOString(),
+                mensagem: 'Conta PNBOX conectada com sucesso.',
+                level: 'success'
+              },
+              ...prev.logs
+            ]
+          }));
+          carregarDados();
         }}
-        onRefreshTraffic={carregarDados}
-        onUpdateActivePlanId={handleUpdateActivePlanId}
+        onFailed={(job) => {
+          setAuthSession((prev) => ({
+            ...prev,
+            status: 'failed',
+            isOnline: false,
+            logs: [
+              {
+                timestamp: new Date().toISOString(),
+                mensagem: `Falha na conexão PNBOX: ${job.errorMessage || 'erro desconhecido'}`,
+                level: 'error'
+              },
+              ...prev.logs
+            ]
+          }));
+        }}
+        onDisconnect={() => {
+          setAuthSession((prev) => ({
+            ...prev,
+            status: 'idle',
+            isExpired: true,
+            isOnline: false,
+            meteorLoginToken: undefined,
+            meteorUserId: undefined,
+            logs: [
+              {
+                timestamp: new Date().toISOString(),
+                mensagem: 'Desconectado do PNBOX.',
+                level: 'info'
+              },
+              ...prev.logs
+            ]
+          }));
+          carregarDados();
+        }}
       />
 
       {/* 6. Container de Toasts de Notificação */}

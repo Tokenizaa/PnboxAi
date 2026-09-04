@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { usePlan } from '../contexts/PlanContext';
+import { usePlans } from '../contexts/PlansContext';
 import { useResearch } from '../contexts/ResearchContext';
 import { useExecution } from '../contexts/ExecutionContext';
 import { FERRAMENTAS_PNBOX } from '../automation/schemaCatalog';
@@ -31,8 +32,9 @@ interface StepResult {
 }
 
 export function PlanExecutionPage() {
-  const { planId } = useParams<{ planId: string }>();
+  const { planId: routePlanId } = useParams<{ planId: string }>();
   const { currentPlan, fetchPlan } = usePlan();
+  const { plans, fetchPlans } = usePlans();
   const { report } = useResearch();
   const {
     mode,
@@ -49,12 +51,39 @@ export function PlanExecutionPage() {
   } = useExecution();
 
   const [steps, setSteps] = useState<StepResult[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [isLoadingPlans, setIsLoadingPlans] = useState<boolean>(true);
 
+  // Load all plans on mount
   useEffect(() => {
-    if (planId) {
-      fetchPlan(planId);
+    const loadAllPlans = async () => {
+      setIsLoadingPlans(true);
+      try {
+        await fetchPlans();
+      } finally {
+        setIsLoadingPlans(false);
+      }
+    };
+    
+    loadAllPlans();
+  }, [fetchPlans]);
+
+  // Determine which plan to use for execution
+  // Priority: 1) Selected plan from dropdown, 2) Plan from route params, 3) First available plan
+  useEffect(() => {
+    if (selectedPlanId) {
+      // Use explicitly selected plan
+      fetchPlan(selectedPlanId);
+    } else if (routePlanId) {
+      // Use plan from route params
+      fetchPlan(routePlanId);
+      setSelectedPlanId(routePlanId);
+    } else if (plans.length > 0) {
+      // Use first available plan
+      fetchPlan(plans[0].id);
+      setSelectedPlanId(plans[0].id);
     }
-  }, [planId, fetchPlan]);
+  }, [selectedPlanId, routePlanId, plans, fetchPlan]);
 
   // Initialize steps from report or template
   useEffect(() => {
@@ -97,7 +126,7 @@ export function PlanExecutionPage() {
     await authenticateSession({
       cpf: '000.000.000-00', // placeholder
       password: 'senha123',
-      idPlano: planId || '',
+      idPlano: selectedPlanId || routePlanId || (plans.length > 0 ? plans[0].id : ''),
     });
   };
 
@@ -131,7 +160,7 @@ export function PlanExecutionPage() {
     }
 
     resetExecution();
-    await executeSingle(planId || '', ferramentaId, items, mode);
+    await executeSingle(currentPlan.id, ferramentaId, items, mode);
   };
 
   const completedSteps = steps.filter((s) => s.status === 'success' || s.status === 'warning').length;
@@ -142,11 +171,40 @@ export function PlanExecutionPage() {
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">
-          <Play className="w-7 h-7 text-emerald-400" />
-          Execução no PNBOX
-        </h1>
-        <p className="text-slate-400 mt-1">Execute as 14 ferramentas no servidor real ou simule</p>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">
+              <Play className="w-7 h-7 text-emerald-400" />
+              Execução no PNBOX
+            </h1>
+            <p className="text-slate-400 mt-1">Execute as 14 ferramentas no servidor real ou simule</p>
+          </div>
+          {/* Plan Selector */}
+          <div className="sm:w-64">
+            <label className="block text-sm font-medium text-slate-300 mb-1">
+              Plano para Execução
+            </label>
+            <select
+              value={selectedPlanId || ''}
+              onChange={(e) => setSelectedPlanId(e.target.value)}
+              disabled={isLoadingPlans || isExecuting}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              <option value="">Selecionar um plano...</option>
+              {isLoadingPlans ? (
+                <option value="">Carregando planos...</option>
+              ) : plans.length === 0 ? (
+                <option value="">Nenhum plano disponível</option>
+              ) : (
+                plans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name} ({plan.sector})
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Mode Selector */}

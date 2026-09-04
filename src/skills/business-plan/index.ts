@@ -65,41 +65,19 @@ export class BusinessPlanSkill {
       jornadaCliente: params.jornadaCliente,
       concorrencia: params.concorrencia,
       financeiro: params.financeiro,
-      canaisAquisicao: params.canaisAquisicao || [
-        'Marketing de Busca (Google Ads & SEO Local)',
-        'Redes Sociais (Instagram e LinkedIn)',
-        'Parcerias Estratégicas B2B'
-      ],
-      canaisVenda: params.canaisVenda || [
-        'Plataforma Digital / Web App',
-        'Atendimento Consultivo via WhatsApp Business',
-        'Vendas Diretas / Inside Sales'
-      ],
-      swot: {
-        forcas: [
-          'Atendimento ágil com tecnologia proprietária',
-          'Proposta de valor altamente diferenciada',
-          'Baixo custo fixo inicial'
-        ],
-        fraquezas: [
-          'Marca nova ainda sem reconhecimento nacional',
-          'Equipe inicial enxuta com necessidade de automação'
-        ],
-        oportunidades: [
-          'Mercado em rápida digitalização e demanda latente',
-          'Possibilidade de escala para outras regiões',
-          'Parcerias com entidades de classe e associações'
-        ],
-        ameacas: [
-          'Entrada de novos concorrentes digitais',
-          'Mudanças na legislação ou regulação do setor'
-        ]
-      },
-      aspectosLegais: {
-        cnae: '6201-5/01 - Desenvolvimento e consultoria em TI',
-        regimeTributario: 'Simples Nacional',
-        licencas: ['Alvará Municipal de Funcionamento', 'Inscrição Municipal']
-      },
+canaisAquisicao: params.canaisAquisicao || [],
+       canaisVenda: params.canaisVenda || [],
+       swot: {
+         forcas: [],
+         fraquezas: [],
+         oportunidades: [],
+         ameacas: []
+       },
+       aspectosLegais: {
+         cnae: '',
+         regimeTributario: '',
+         licencas: []
+       },
       fontesConsultadas: params.fontesConsultadas || [],
       criadoEm: now,
       atualizadoEm: now

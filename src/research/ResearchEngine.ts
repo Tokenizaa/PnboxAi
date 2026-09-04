@@ -21,7 +21,6 @@ import {
 import { EvidenceStore, EvidenceAnalyst } from "./evidence";
 import { ResearchSynthesizer } from "./synthesis";
 import { PnboxAdapter } from "./mappers";
-import { executarPesquisaUnificada } from "../automation/aiProviders";
 
 export interface DeepResearchV2Input {
   prompt: string;
@@ -30,13 +29,7 @@ export interface DeepResearchV2Input {
   publicoAlvo?: string;
   modeloAprofundado?: boolean;
   idPlano?: string;
-  provider?: "gemini" | "nvidia";
-  useSearchGrounding?: boolean;
-  existingReport?: ResearchReport;
-  searchApiKey?: string;
-  searchProvider?: "tavily" | "brave" | "serpapi" | "custom";
   maxIterations?: number;
-  preserveLegacy?: boolean;
 }
 
 export interface DeepResearchV2Result {
@@ -56,18 +49,14 @@ export class ResearchEngine {
   private sufficiencyAnalyzer: ResearchSufficiencyAnalyzer;
   private synthesizer: ResearchSynthesizer;
 
-  constructor(config?: {
-    searchProvider?: "tavily" | "brave" | "serpapi" | "custom";
-    searchApiKey?: string;
-  }) {
+  constructor() {
     this.businessAnalyzer = new BusinessAnalyzerAgent();
     this.researchPlanner = new ResearchPlannerAgent();
     this.evidenceStore = new EvidenceStore();
     this.evidenceAnalyst = new EvidenceAnalyst(this.evidenceStore);
-    this.sourceEngine = new SourceEngine({
-      searchProvider: config?.searchProvider || "custom",
-      apiKey: config?.searchApiKey,
-    });
+    
+    this.sourceEngine = new SourceEngine();
+    
     this.gapAnalyzer = new GapAnalyzer();
     this.contradictionAnalyzer = new ContradictionAnalyzer();
     this.sufficiencyAnalyzer = new ResearchSufficiencyAnalyzer();
@@ -76,7 +65,10 @@ export class ResearchEngine {
 
   async execute(input: DeepResearchV2Input): Promise<DeepResearchV2Result> {
     const startTime = Date.now();
-    const idPlano = input.idPlano || "plan_default";
+    const idPlano = input.idPlano;
+    if (!idPlano) {
+      throw new Error("idPlano is required for research execution. Cannot proceed without a valid plan identifier.");
+    }
 
     this.evidenceStore.clear();
 
@@ -86,7 +78,6 @@ export class ResearchEngine {
       orcamentoEstimado: input.orcamentoEstimado,
       publicoAlvo: input.publicoAlvo,
       modeloAprofundado: input.modeloAprofundado,
-      existingPlan: input.existingReport?.plan,
     });
 
     let plan = plannerOutput.plan;
@@ -105,7 +96,7 @@ export class ResearchEngine {
 
     const defaultExecutor: TaskExecutor = {
       execute: async (task: ResearchTask, p: ResearchPlan) => {
-        return this.executeTask(task, p, input);
+        return this.executeTask(task, p);
       },
     };
     orchestrator.registerDefaultExecutor(defaultExecutor);
@@ -187,7 +178,7 @@ export class ResearchEngine {
     };
   }
 
-  private async executeTask(task: ResearchTask, plan: ResearchPlan, input: DeepResearchV2Input): Promise<ResearchTask> {
+  private async executeTask(task: ResearchTask, plan: ResearchPlan): Promise<ResearchTask> {
     const sources = await this.sourceEngine.processTaskQueries({
       queries: task.queries,
       category: task.category,
@@ -222,19 +213,6 @@ export class ResearchEngine {
         claims,
       },
     };
-  }
-
-  async generateWithAI(input: DeepResearchV2Input): Promise<DeepResearchV2Result> {
-    const baseReport = await executarPesquisaUnificada(input.prompt, {
-      provider: input.provider || "gemini",
-      cidadeUf: input.cidadeUf,
-      orcamentoEstimado: input.orcamentoEstimado || 100000,
-      publicoAlvo: input.publicoAlvo,
-      modeloAprofundado: input.modeloAprofundado,
-      useSearchGrounding: input.useSearchGrounding,
-    });
-
-    return this.execute(input);
   }
 }
 

@@ -24,61 +24,9 @@ interface HistoryEvent {
   status: 'success' | 'warning' | 'error' | 'info';
 }
 
-const mockHistory: HistoryEvent[] = [
-  {
-    id: '1',
-    timestamp: '2025-01-18T14:30:00Z',
-    type: 'execute',
-    action: 'Execução DRY_RUN das 14 ferramentas',
-    user: 'Sistema',
-    details: '14 ferramentas validadas - 142 registros',
-    status: 'success',
-  },
-  {
-    id: '2',
-    timestamp: '2025-01-15T10:30:00Z',
-    type: 'research',
-    action: 'Pesquisa de mercado concluída',
-    user: 'João',
-    details: 'Iteração 3/3 - Suficiência: 87%',
-    status: 'success',
-  },
-  {
-    id: '3',
-    timestamp: '2025-01-12T09:00:00Z',
-    type: 'research',
-    action: 'Deep Research iniciado',
-    user: 'João',
-    details: 'Iteração 1/3',
-    status: 'info',
-  },
-  {
-    id: '4',
-    timestamp: '2025-01-10T16:45:00Z',
-    type: 'edit',
-    action: 'Editou Proposta de Valor',
-    user: 'João',
-    details: 'Campo "tarefasCliente" alterado',
-    status: 'info',
-  },
-  {
-    id: '5',
-    timestamp: '2025-01-05T11:20:00Z',
-    type: 'edit',
-    action: 'Editou Análise de Concorrência',
-    user: 'João',
-    status: 'info',
-  },
-  {
-    id: '6',
-    timestamp: '2025-01-01T10:00:00Z',
-    type: 'created',
-    action: 'Plano criado',
-    user: 'João',
-    details: 'Método: Deep Research IA',
-    status: 'success',
-  },
-];
+// Histórico real deve vir do banco de dados via API
+// Sem dados mock em produção - retornar array vazio
+const mockHistory: HistoryEvent[] = [];
 
 const eventTypeConfig = {
   created: { icon: Sparkles, label: 'Criação', color: 'text-emerald-400 bg-emerald-500/10' },
