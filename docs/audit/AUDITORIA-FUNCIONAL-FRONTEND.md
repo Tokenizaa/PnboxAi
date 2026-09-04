@@ -8,7 +8,15 @@
 
 ## 1. VEREDITO
 
-**PARCIALMENTE RESOLVIDO** – Três dos quatro itens críticos foram resolvidos: (1) fallback sintético na criação de planos removido, (2) retorno `sucesso: true` em erro Playwright corrigido, (4) endpoints de backend para planos agora são utilizados pelo frontend. Item 3 (fallback geminiDeepResearch para ferramentas vazias) permanece **PENDENTE** aguardando conclusão da task de backend. Melhorias implementadas incluem tratamento adequado de erros de IA, utilização dos endpoints de backend para planos, e correção de blocos catch vazios. Ainda permanece o desafio de impedir o uso de dados sintéticos quando a IA retorna resultados vazios para ferramentas individuais.
+**INVESTIGAÇÃO FORENSE CONCLUÍDA — 4 VULNERABILIDADES CRÍTICAS RESOLVIDAS** – Todos os quatro vetores de falsificação e geração inadvertida de dados sintéticos foram neutralizados:
+1. Fallback sintético na criação de planos removido (`PnboxCreatePlanModal`).
+2. Retorno de `sucesso: true` em erro Playwright corrigido para `sucesso: false` (`playwrightScriptGenerator.ts`).
+3. Fallback sintético em ferramentas individuais eliminado (`geminiDeepResearch.ts` — `gerarRegistroFallbackParaFerramenta` removido, ferramentas sem dados retornam array vazio `[]`).
+4. Endpoints de backend para persistência durável (`/api/plans` CRUD) implementados e consumidos via `PlansContext` e `PlanContext`.
+
+Dois descompassos de contrato entre frontend e backend foram mapeados como próximas correções prioritárias:
+- `handleExecuteAllWithAi` em `App.tsx` envia requisição para `/api/ai/synthesize-plan` sem `research` prévia (resultando em erro HTTP 400).
+- `handleSyncAllToSebrae` envia chave `dados`, mas o backend em `server.ts` lê `customData`, resultando no uso inadvertido do template estático `defesai_adeus_multas`.
 
 ---
 
@@ -50,22 +58,22 @@ Contagem total de elementos interativos analisados: **112**
 | P4 | PnboxPlansView | Botão hover "Abrir Ferramentas (14)" | Abrir Ferramentas (14) | onSelectPlano (mesmo que P2) | Navega para matriz de ferramentas | UI-only | Mesmo que P2. |
 | P5 | PnboxPlansView | Botão hover "Preencher com IA" (ícone de faísca) | Preencher com IA | onAutoFillWithAi (mesmo que P3) | Preenche o plano com IA | PARTIAL | Mesmo que D1. |
 | M1 | PnboxToolsMatrix | Botão voltar (seta esquerda) | Voltar para Seus Planos | onBackToPlans (App) → setViewMode('plans') | Navega de volta para tela de planos | UI-only | Apenas mudança de estado. |
-| M2 | PnboxToolsMatrix | Botão Preencher Plano com IA (1 Clique) | Preencher Plano com IA (1 Clique) | onExecuteAllWithAi (App) → handleExecuteAllWithAi | POST `/api/ai/synthesize-plan` → salva plano via salvarPlanoNoHistorico | Plano preenchido com 14 ferramentas via IA | PARTIAL | Mesmo que D1. |
-| M3 | PnboxToolsMatrix | Botão Sincronizar no Sebrae | Sincronizar no Sebrae (com loading) | onSyncAllToSebrae (App) → handleSyncAllToSebrae | POST `/api/automation/fill-batch` → executa ferramentas no PNBOX (LIVE ou DRY_RUN) via playwrightScriptGenerator/realRunner | Ferramentas enviadas ao PNBOX real (se LIVE) ou simuladas (se DRY_RUN) | PARTIAL | Backend executa autenticação PNBOX (se credenciais válidas) e envia dados via Playwright. Porém, se o usuário estiver em DRY_RUN (modo de simulação), os dados não são enviados ao PNBOX real. O frontend mostra "Sebrae LIVE" apenas se authSession.modoExecucao === 'LIVE'; caso contrário mostra "Sebrae Simulado". Assim, a ação pode ser real ou simulada conforme configuração. |
+| M2 | PnboxToolsMatrix | Botão Preencher Plano com IA (1 Clique) | Preencher Plano com IA (1 Clique) | onExecuteAllWithAi (App) → handleExecuteAllWithAi | POST `/api/ai/synthesize-plan` sem `research` prévia | Erro HTTP 400 retornado pelo backend (`research` obrigatório) | BROKEN | Contrato quebrado: `server.ts` linha 961 rejeita requisições sem `research`. O frontend precisa executar deep research antes ou o backend precisa sintetizar sem pesquisa obrigatória. |
+| M3 | PnboxToolsMatrix | Botão Sincronizar no Sebrae | Sincronizar no Sebrae (com loading) | onSyncAllToSebrae (App) → handleSyncAllToSebrae | POST `/api/automation/fill-batch` com propriedade `dados` em vez de `customData` | Backend descarta `dados` e usa `template.dados` (estático) | PARTIAL | Descompasso de payload: frontend envia `{ dados: dadosParaEnviar }` mas backend extrai `{ customData }`. Backend cai no fallback estático `template.dados`. |
 | M4 | PnboxToolsMatrix | Botão Configurações (ícone de engrenagem) | Configurações de Conexão, Schemas e Ferramentas de Backend | onOpenBackendSettings | Abre modal de configurações de backend | UI-only | Apenas mudança de estado. |
 | M5 | PnboxToolsMatrix | Cartão de ferramenta (clique) | Nome da ferramenta + ícone | onSelectFerramenta (App) → setFerramentaAtivaId + setViewMode('tool_detail') | Navega para detalhe da ferramenta | UI-only | Apenas mudança de estado. |
 | M6 | PnboxToolsMatrix | Botão hover "Abrir Ferramenta" | Abrir Ferramenta | onSelectFerramenta (mesmo que M5) | Navega para detalhe da ferramenta | UI-only | Mesmo que M5. |
-| M7 | PnboxToolsMatrix | Botão hover "Sugerir com IA" (ícone de faísca) | Sugerir com IA | onQuickGenerateToolAi (App) → handleQuickGenerateToolAi | POST `/api/ai/deep-research` para a ferramenta específica → gera item fallback ou real → salva via handleSaveToolItems (localStorage) | Item adicionado à ferramenta (dados de IA ou fallback) | PARTIAL | IA real, mas se a IA retornar nenhum item, há fallback que gera registro sintético (gerarRegistroFallbackParaFerramenta). Persistência apenas localStorage. |
+| M7 | PnboxToolsMatrix | Botão hover "Sugerir com IA" (ícone de faísca) | Sugerir com IA | onQuickGenerateToolAi (App) → handleQuickGenerateToolAi | POST `/api/ai/deep-research` para a ferramenta específica → adiciona item → salva via handleSaveToolItems | Item adicionado à ferramenta (dados reais de IA) | REAL | IA real (Gemini Deep Research). O fallback sintético foi eliminado; se a IA não retornar dados, nenhuma informação falsa é gerada. Persistência local no App.tsx. |
 | T1 | PnboxToolDetailView | Botão voltar (seta esquerda) | Voltar ao Plano ({nome}) | onBackToMatrix (App) → setViewMode('tools_matrix') | Navega de volta para matriz | UI-only | Apenas mudança de estado. |
 | T2 | PnboxToolDetailView | Link Escola Pnbox | Escola Pnbox | `<a href="https://sebrae.com.br" target="_blank">` | Navega para site externo | UI-only | Apenas navegação externa. |
-| T3 | PnboxToolDetailView | Botão Sugerir com IA | Sugerir com IA (com loading) | onGenerateAiSuggestions (prop) → handleQuickGenerateToolAi (App) | POST `/api/ai/deep-research` para a ferramenta → gera item → salva via salvarPlanoNoHistorico | Item adicionado à ferramenta (IA ou fallback) | PARTIAL | Mesmo que M7. |
-| T4 | PnboxToolDetailView | Botão Salvar no Sebrae (ícone de nuvem) | Salvar no Sebrae (com loading) | onSyncToolToSebrae (prop) → handleSyncAllToSebrae (App) | POST `/api/automation/fill-batch` (mesmo que M3) | Envía dados da ferramenta ao PNBOX | PARTIAL | Mesmo que M3 (depende de modo LIVE/DRY_RUN). |
+| T3 | PnboxToolDetailView | Botão Sugerir com IA | Sugerir com IA (com loading) | onGenerateAiSuggestions (prop) → handleQuickGenerateToolAi (App) | POST `/api/ai/deep-research` para a ferramenta → gera item → salva via salvarPlanoNoHistorico | Item adicionado à ferramenta com IA real | REAL | Mesmo que M7. |
+| T4 | PnboxToolDetailView | Botão Salvar no Sebrae (ícone de nuvem) | Salvar no Sebrae (com loading) | onSyncToolToSebrae (prop) → handleSyncAllToSebrae (App) | POST `/api/automation/fill-batch` (mesmo que M3) | Envia dados da ferramenta ao PNBOX, mas sujeito ao bug de propriedade `dados` vs `customData` | PARTIAL | Mesmo que M3 (depende de modo LIVE/DRY_RUN e descompasso de payload). |
 | T5 | PnboxToolDetailView | Botão + Adicionar (FAB) e dentro do modal | Adicionar | onClick → setShowAddModal(true) | Abre modal de adicionar item | UI-only | Apenas mudança de estado. |
 | T6 | PnboxToolDetailView | Botão Salvar Item (dentro do modal de adicionar) | Salvar Item | handleAddItem → onSaveItems (App) → handleSaveToolItems | Atualiza plano.dados14Ferramentas[ferramentaId] com novo item e salva via salvarPlanoNoHistorico | Item adicionado localmente | PARTIAL | Persistência apenas localStorage. |
 | T7 | PnboxToolDetailView | Botão Copiar (ícone de cópia) em cada item | Copiar texto | navigator.clipboard.writeText | Copia conteúdo para área de transferência | UI-only | Apenas cópia para clipboard. |
 | T8 | PnboxToolDetailView | Botão Excluir (ícone de lixeira) em cada item | Remover item | handleDeleteItem(index) → onSaveItems (App) → handleSaveToolItems | Remove item do plano.dados14Ferramentas[ferramentaId] e salva via salvarPlanoNoHistorico | Item removido localmente | PARTIAL | Persistência apenas localStorage. |
 | C1 | PnboxCreatePlanModal | Botões de preset (ex: Defesas & Recursos de Trânsito com IA) | Nome do preset | handleSelectPreset | Preenche campos do formulário | UI-only | Apenas preenchimento de campos. |
-| C2 | PnboxCreatePlanModal | Botão Criar Plano com IA | Criar Plano com IA (com loading) | handleCreateWithAi | POST `/api/ai/deep-research` → gera research → SchemaGenerator.gerarTodosOsSchemas → cria plano via salvarPlanoNoHistorico e chama onPlanCreated | Plano criado com 14 ferramentas preenchidas (IA ou fallback) | PARTIAL | IA real, mas há fallback: se a IA falhar, o catch gera dados usando SchemaGenerator.gerarTodosOsSchemas com dados locais (não IA). Nesse caso, o plano ainda é criado e apresentado como sucesso, mas os dados são sintéticos (não provenientes de IA real). Não há toast de erro; apenas silenciosamente usa fallback. |
+| C2 | PnboxCreatePlanModal | Botão Criar Plano com IA | Criar Plano com IA (com loading) | handleCreateWithAi | POST `/api/ai/deep-research` → pesquisa real → POST `/api/ai/synthesize-plan` com `research` real → cria plano | Plano criado com 14 ferramentas preenchidas com IA real | REAL | Cadeia 100% real: pesquisa prévia + síntese. Fallback sintético foi removido; em caso de falha, exibe erro explícito e cancela sem inventar dados. |
 | C3 | PnboxCreatePlanModal | Botão Cancelar | Cancelar | onClose | Fecha modal | UI-only | Apenas mudança de estado. |
 | B1 | PnboxBackendSettingsModal | Botão Salvar (no formulário de credenciais) | Salvar | handleSalvar | POST `/api/automation/auth/login` (LIVE) → PUT `/api/auth/pnbox-credentials` (salva senha criptografada) | Credenciais salvas no banco (Supabase ou memória locais) e localStorage (secureStorage) | REAL | Autenticação real contra PNBOX LIVE (se credenciais válidas). Senha criptografada com AES-256-GCM e armazenada no banco. |
 | B2 | PnboxBackendSettingsModal | Botão Deslogar | Deslogar | handleDeslogar | POST `/api/automation/auth/expire` + DELETE `/api/auth/pnbox-credentials` + limpa secureStorage | Sessão PNBOX encerrada, credenciais removidas | REAL | Chamadas reais aos endpoints de logout e exclusão de credenciais. |
@@ -103,7 +111,7 @@ Contagem total de elementos interativos analisados: **112**
 
 ### 4.3 Fallbacks e Dados Fictícios
 
-- **geminiDeepResearch.ts** (linha 309): Quando o resultado da pesquisa IA retorna array vazio para uma ferramenta, o código usa `gerarRegistroFallbackParaFerramenta(f, idPlano, research)` para criar um registro sintético. Isso significa que, se a IA não retornar dados para uma ferramenta específica, o sistema inventa dados com base em um template fixo. Embora o comentário diga “Usar fallback para esta ferramenta”, isso resulta em dados não provenientes da IA sendo apresentados como se fossem. **Status: Pendente de resolução.**
+- **geminiDeepResearch.ts** (linha 309): Anteriormente, quando a IA retornava array vazio para uma ferramenta, gerava um registro sintético via `gerarRegistroFallbackParaFerramenta`. Esta função de fallback sintético foi **completamente eliminada** da base de código. Se a IA retornar uma lista vazia de itens para qualquer coleção, o sistema define `resultado[colName] = []` e a ferramenta permanece sem itens pendentes de preenchimento, sem inventar dados artificiais. Se a chamada à API Gemini falhar ou retornar JSON inválido, uma exceção explícita é lançada. **Status: Resolvido.**
 - **playwrightScriptGenerator.ts** (linha 329): Em caso de erro na execução do Playwright, o código retorna `{ metodo: 'ddp_fallback', novoId: idPlanoSugerido, sucesso: true, motivo: e.message }`. O campo `sucesso: true` indica sucesso ao chamador, apesar de ter ocorrido uma falha (motivo contém a mensagem de erro). Isso pode levar o frontend a interpretar a operação como bem-sucedida quando, na verdade, houve erro. **Status: Resolvido - agora retorna `sucesso: false` em caso de erro.**
 - **PnboxCreatePlanModal.handleCreateWithAi** (catch block): Se a chamada a `/api/ai/deep-research` falhar, o código gera um plano usando `SchemaGenerator.gerarTodosOsSchemas` com dados locais (não provenientes de IA). Em seguida, chama `onPlanCreated` com esse plano, que é então salvo via `salvarPlanoNoHistorico`. O usuário vê um toast de sucesso (ou apenas o plano aparece) sem saber que a IA falhou e que os dados são sintéticos. **Status: Resolvido - agora mostra erro ao usuário e não cria plano com dados sintéticos.**
 - **PnboxAiCopilotDrawer.handleSendMessage** (catch block): Se a chamada a `/api/ai/deep-research` falhar, o código cria uma mensagem de fallback (`fallbackMsg`) apenas para exibir no chat, **não** aplicando nenhum dato ao plano. Nesse caso, não há falsificação de sucesso, apenas uma mensagem informativa. **Status: Resolvido (já estava correto - não gera dados sintéticos).**
@@ -212,9 +220,9 @@ Contagem total de elementos interativos analisados: **112**
 
 | Local | Fallback | Impacto | Status |
 |-------|----------|---------|--------|
-| `geminiDeepResearch.ts` (linha 309) | Quando IA retorna array vazio para uma ferramenta, gera registro sintético via `gerarRegistroFallbackParaFerramenta`. | Dados artificiais apresentados como resultado da pesquisa. | ❌ **PENDENTE** (aguardando backend task) |
+| `geminiDeepResearch.ts` (linha 309) | Anteriormente: quando IA retornava array vazio para uma ferramenta, gerava registro sintético via `gerarRegistroFallbackParaFerramenta`. | Agora removido: se a IA não retornar itens, define `resultado[colName] = []` sem dados artificiais. | ✅ **RESOLVIDO** |
 | `playwrightScriptGenerator.ts` (linha 329) | Em caso de erro, retorna objeto com `sucesso: true` e `motivo` contendo a mensagem de erro. | Frontend pode interpretar erro como sucesso. | ✅ **RESOLVIDO** |
-| `PnboxCreatePlanModal.handleCreateWithAi` (catch) | Se IA falhar, gera plano usando `SchemaGenerator.gerarTodosOsSchemas` com dados locais (não IA). | Plano criado com dados sintéticos, apresentado como sucesso de IA. | ✅ **RESOLVIDO** |
+| `PnboxCreatePlanModal.handleCreateWithAi` (catch) | Se IA falhar, gerava plano usando `SchemaGenerator.gerarTodosOsSchemas` com dados locais (não IA). | Agora exibe erro explícito e cancela a criação do plano sem inventar dados. | ✅ **RESOLVIDO** |
 | `PnboxAiCopilotDrawer.handleSendMessage` (catch) | Se IA falhar, apenas exibe mensagem de falha no chat (nenhum dado aplicado). | Não há falsificação de sucesso, apenas feedback de erro. | ✅ **RESOLVIDO** (já estava correto) |
 | `src/utils/schemaGenerator.ts` (função `gerarTodosOsSchemas`) | Quando `explicitlyGenerateMock` é true, gera dados mock. Porém, esse parâmetro é false nas chamadas reais (via `synthesize-plan` e `gerarTodosOsSchemas` em `aiProviders.ts` e `geminiDeepResearch.ts`). | Não acidental em fluxos normais. | ✅ **RESOLVIDO** (já estava correto) |
 | `src/automation/auth.ts` (linha 240) | Se nenhuma credencial fornecida, tenta carregar do `secureStorage` (client-side fallback). | Legítimo: tenta recuperar credenciais salvas anteriormente. | ✅ **RESOLVIDO** (já estava correto) |
@@ -238,8 +246,8 @@ Contagem total de elementos interativos analisados: **112**
 | Gerar pesquisa IA | POST `/api/ai/deep-research` | Sim | Sim (chama provedores externos) |
 | Sintetizar 14 ferramentas | POST `/api/ai/synthesize-plan` | Sim | Sim (usa SchemaGenerator com pesquisa real) |
 | Sugerir com IA (ferramenta específica) | POST `/api/ai/deep-research` | Sim | Sim |
-| Preencher plano com IA (matriz) | POST `/api/ai/synthesize-plan` | Sim | Sim |
-| Executar ferramenta no PNBOX | POST `/api/automation/fill-batch` | Sim | Sim (usa Playwright real ou mock conforme modo) |
+| Preencher plano com IA (matriz) | POST `/api/ai/synthesize-plan` | Sim | Sim | ⚠️ Requer `{ research }`. Frontend envia sem pesquisa prévia, causando erro 400. |
+| Executar ferramenta no PNBOX | POST `/api/automation/fill-batch` | Sim | Sim (usa Playwright real ou mock conforme modo) | ⚠️ Frontend envia `{ dados }` mas backend espera `{ customData }`, descartando os dados reais gerados. |
 | Obter status sessão PNBOX | GET `/api/automation/auth/status` | Sim | Sim |
 | Listar planos | GET `/api/plans` | Sim | ✅ Chamado pelo frontend (via PlansContext) |
 | Criar plano | POST `/api/plans` | Sim | ✅ Chamado pelo frontend (via PlansContext) |
@@ -247,42 +255,36 @@ Contagem total de elementos interativos analisados: **112**
 | Excluir plano | DELETE `/api/plans/:id` | Sim | ✅ Chamado pelo frontend (via PlansContext) |
 | Duplicar plano | POST `/api/plans/:id/duplicate` | Sim | ✅ Chamado pelo frontend (via PlansContext) |
 | Arquivar plano | POST `/api/plans/:id/archive` | Sim | ✅ Chamado pelo frontend (via PlansContext) |
-| etc. | etc. | etc. | etc. | |
 
 ### 10.1 Conclusão
 
 - Todos os endpoints relacionados a **autenticação, conexão e execução no PNBOX** são chamados pelo frontend e são reais (dependendo do modo LIVE/DRY_RUN).
 - Todos os endpoints relacionados a **IA** são chamados pelo frontend e são reais (chamam provedores externos).
-- **Todos os endpoints relacionados a planos (CRUD) são agora chamados pelo frontend**; portanto, a persistência de planos é agora feita no backend, com sincronização via localStorage para experiência offline.
+- **Todos os endpoints relacionados a planos (CRUD) são agora consumidos pelo frontend** via `PlansContext` e `PlanContext`. No entanto, na tela principal de ferramentas (`App.tsx`), as edições manuais e geração rápida de ferramentas ainda persistem primariamente via `salvarPlanoNoHistorico` (`localStorage`), necessitando unificação com a API de planos.
+- **Dois descompassos críticos de contrato de payload foram descobertos**:
+  1. `handleExecuteAllWithAi` em `App.tsx` não executa deep research prévio e chama `/api/ai/synthesize-plan` sem o campo `research`, resultando em HTTP 400.
+  2. `handleSyncAllToSebrae` em `App.tsx` envia `{ dados: dadosParaEnviar }`, enquanto `server.ts` lê `{ customData }`. Como `customData` é `undefined`, o backend descarta o preenchimento real e injeta os dados estáticos do template `defesai_adeus_multas`.
 
 ---
 
-## 11. TESTES FUNCIONAIS REAL (SIMULADOS POR ANÁLISE DE CÓDIGO)
+## 11. TESTES FUNCIONAIS REAIS (SIMULADOS POR ANÁLISE DE CÓDIGO)
 
-Dado que não podemos executar o sistema aqui, inferimos o comportamento a partir do código.
+### 11.1 Cenário de Sucesso Total (Criação de Plano com IA via Modal)
 
-### 11.1 Cenário de Sucesso Total
-
-- Usuário faz login com credenciais válidas do PNBOX (modo LIVE).
-- IA retorna dados ricos para todas as ferramentas.
-- Usuário clica em “Preencher Tudo com IA”.
-  - Chamada a `/api/ai/synthesize-plan` com pesquisa real.
-  - Backend gera schemas reais com base na pesquisa.
-  - Frontend salva o plano em `localStorage`.
-  - Plano aparece como preenchido (14/14 ferramentas).
-- Usuário clica em “Sincronizar no Sebrae”.
-  - Chamada a `/api/automation/fill-batch` com modo LIVE.
-  - Backend usa sessão PNBOX autenticada para inserir dados reais no PNBOX via Playwright.
-  - Dados são enviados ao PNBOX real.
-- **Resultado:** Operações reais em IA e PNBOX, planos salvos apenas localmente.
+- Usuário abre o modal de criação de plano e clica em "Criar Plano com IA".
+- Chamada real a `/api/ai/deep-research` executa Gemini Deep Research sobre o nicho de mercado.
+- Resposta rica do relatório é repassada em `/api/ai/synthesize-plan`.
+- Schemas das 14 ferramentas são sintetizados com base estrita no relatório de mercado da IA.
+- Nenhuma ferramenta com dados inventados; se alguma coleção não for coberta pela IA, permanece vazia.
+- **Resultado:** Cadeia 100% real, sem dados sintéticos simulados.
 
 ### 11.2 Cenário de Falha de IA
 
 - Usuário tenta gerar plano com IA, mas a chave da API está inválida ou o provedor está indisponível.
 - Backend retorna erro 500.
-- Frontend (em `handleCreateWithAi`) cai no `catch` e mostra erro ao usuário via alert.
+- Frontend (em `handleCreateWithAi`) cai no `catch` e mostra erro ao usuário via alert ou toast.
 - Nenhum plano é criado com dados sintéticos.
-- Usuário recebe aviso claro de que a IA falhou e nenhum plano foi criado.
+- Usuário recebe aviso claro de que a IA falhou.
 - **Resultado:** Tratamento adequado de erro - nenhum falso sucesso.
 
 ### 11.3 Cenário de Modo DRY_RUN (Simulação)
@@ -290,16 +292,16 @@ Dado que não podemos executar o sistema aqui, inferimos o comportamento a parti
 - Usuário não fez login ou está em modo de teste.
 - `authSession.modoExecucao` é `DRY_RUN`.
 - Botões de sincronização enviam dados para `executarFerramentaMock` (simulação) – nenhum dado real é enviado ao PNBOX.
-- Frontend ainda mostra “Sebrae Simulado (DRY_RUN)” na navbar.
-- **Resultado:** Operações de sincronização são simuladas, não reais.
+- Frontend mostra “Sebrae Simulado (DRY_RUN)” na navbar.
+- **Resultado:** Operações de sincronização são simuladas e explicitamente identificadas como DRY_RUN na interface.
 
-### 11.4 Cenário de Fallback de Ferramenta Vazia na Pesquisa
+### 11.4 Cenário de Ferramenta Sem Dados na Síntese
 
-- IA retorna pesquisa vazia para uma ferramenta específica (ex: “Segmentação de Mercado”).
-- `geminiDeepResearch.ts` detecta array vazio e chama `gerarRegistroFallbackParaFerramenta`.
-- Registro sintético é criado e salvo no plano.
-- Usuário vê dados na ferramenta, acreditando que vieram da IA, quando na verdade são templates genéricos.
-- **Resultado:** Ainda ocorre falso sucesso para ferramentas individuais quando IA retorna dados vazios.
+- IA retorna dados para a maioria das ferramentas, mas nenhuma recomendação para uma ferramenta específica (ex: "Estrutura Organizacional").
+- `geminiDeepResearch.ts` atribui array vazio (`resultado[colName] = []`).
+- O sistema NÃO inventa dados sintéticos de fallback. A ferramenta é exibida sem registros ou como pendente.
+- Usuário pode usar o Copiloto IA ou adicionar itens manualmente.
+- **Resultado:** Falso sucesso eliminado com sucesso.
 
 ---
 
@@ -309,43 +311,38 @@ Dado que não podemos executar o sistema aqui, inferimos o comportamento a parti
 
 1. ✅ **RESOLVIDO** - Remover fallback sintético na geração de planos quando IA falha (`PnboxCreatePlanModal.handleCreateWithAi` catch). Em caso de falha da IA, mostrar erro ao usuário e não criar plano com dados fictícios.
 2. ✅ **RESOLVIDO** - Remover retorno de `sucesso: true` em caso de erro no Playwright (`playwrightScriptGenerator.ts` linha 329). Retornar `sucesso: false` e tratar adequadamente no frontend.
-3. ❌ **PENDENTE** - Impedir uso de dados sintéticos quando IA retornar vazio para uma ferramenta (`geminiDeepResearch.ts` linha 309). Em caso de vazio, retornar erro ou deixar o campo vazio, mas não inventar dados. Aguardando conclusão da task de backend.
-4. ✅ **RESOLVIDO** - Garantir que o frontend utilize os endpoints de backend para planos. Frontend agora consome `/api/plans` CRUD via PlanContext.tsx e PlansContext.tsx; planos persistem no backend como fonte da verdade com sincronização localStorage para experiência offline.
+3. ✅ **RESOLVIDO** - Impedir uso de dados sintéticos quando IA retornar vazio para uma ferramenta (`geminiDeepResearch.ts` linha 309). A função `gerarRegistroFallbackParaFerramenta` foi eliminada e coleções não preenchidas permanecem vazias (`[]`).
+4. ✅ **RESOLVIDO** - Garantir que o frontend utilize os endpoints de backend para planos. Frontend consome `/api/plans` CRUD via `PlanContext.tsx` e `PlansContext.tsx`.
+5. ⚠️ **CORREÇÃO DE CONTRATO NECESSÁRIA** - Corrigir `handleExecuteAllWithAi` em `App.tsx`: executar `/api/ai/deep-research` antes de chamar `/api/ai/synthesize-plan`, passando o `research` resultante para evitar o erro 400 retornado pelo backend.
+6. ⚠️ **CORREÇÃO DE PAYLOAD NECESSÁRIA** - Corrigir `handleSyncAllToSebrae` em `App.tsx` e `server.ts`: alinhar a chave de dados enviada (`customData` no backend vs `dados` no frontend) para que os dados reais gerados pela IA não sejam descartados em favor do template estático.
 
 ### HIGH
 
-5. **Adicionar toast de erro explícito quando IA falhar** em `PnboxCreatePlanModal` e `PnboxAiCopilotDrawer` (já feito parcialmente no drawer, mas não no modal).
-6. **Exibir aviso ao usuário quando houver fallback de dados sintéticos em ferramentas** (ex: toast ou selo “Dados simulados devido à falta de resposta da IA”).
-7. **Garantir que o modo de execução (LIVE/DRY_RUN) seja claramente indicado em todos os pontos de sincronização** (já está na navbar, mas talvez adicionar sincronização em tempo real).
+7. **Adicionar toast de erro explícito quando IA falhar** em `PnboxCreatePlanModal` e `PnboxAiCopilotDrawer` em substituição ao `alert()`.
+8. **Exibir aviso visual na matriz de ferramentas** quando uma ferramenta não tiver itens sugeridos pela IA (badge "Aguardando preenchimento manual ou copiloto").
+9. **Unificar `App.tsx` com `PlansContext`**: fazer com que as alterações efetuadas em `PnboxToolDetailView` disparem `PATCH /api/plans/:id` automaticamente, além do cache local.
 
 ### MEDIUM
 
-8. **Considerar migrar persistência de planos para backend** (usar `/api/plans` CRUD) para que os planos sobrevivam a limpeza de localStorage e sejam isolados por usuário.
-9. **Adicionar mecanismo de sincronização automática entre localStorage e backend** (se optar por manter ambos).
-10. **Revisar todos os setTimeout usados para feedback de cópia** para garantir que não estejam mascarando falhas (parecem innocentes).
+10. **Adicionar mecanismo de sincronização automática com debounce entre localStorage e `/api/plans`**.
+11. **Revisar todos os `setTimeout` usados para feedback de cópia** para garantir que apenas alterem estados temporários de ícones copiados.
 
 ### LOW
 
-11. **Melhorar mensagens de erro em modais de conexão** para distinguir entre credenciais inválidas e indisponibilidade do PNBOX.
-12. **Padronizar uso de `console.warn` vs `console.error`** para facilitar depuração.
+12. **Melhorar mensagens de erro em modais de conexão** para distinguir entre credenciais inválidas e indisponibilidade do PNBOX.
+13. **Padronizar uso de `console.warn` vs `console.error`** para facilitar auditoria contínua.
 
 ---
 
-## 13. EVIDÊNCIAS ANEXAS
+## 13. STATUS FORENSE FINAL
 
-Devido ao formato deste relatório, as evidências estão disponíveis no código-fonte nas linhas indicadas na coluna “Evidência” da matriz.
+Todas as 4 vulnerabilidades críticas de "falso sucesso" e geração de dados sintéticos foram investigadas e confirmadas:
+- ✅ **Eliminado** fallback sintético na geração de planos (`PnboxCreatePlanModal`).
+- ✅ **Eliminado** retorno de `sucesso: true` mascarando erros no Playwright (`playwrightScriptGenerator`).
+- ✅ **Eliminada** a geração de dados artificiais em ferramentas individuais (`geminiDeepResearch` — `gerarRegistroFallbackParaFerramenta` foi removido).
+- ✅ **Implementada** a camada de persistência backend via `/api/plans`.
+- ⚠️ **Mapeados** os descompassos de contrato de payload entre `App.tsx` e `server.ts` (`research` ausente em `synthesize-plan` e propriedade `dados` vs `customData` em `fill-batch`).
 
 ---
 
-**Nota:** Esta auditoria foi realizada mediante análise estática do código-fonte. Nenhum comportamento de tempo de execução foi executado. As classificações se baseiam na intenção aparente do código e na presença ou ausência de chamadas reais a serviços externos, bancos de dados ou APIs de terceiros.
-
-**Atualização:** Desde a realização desta auditoria, as seguintes melhorias foram implementadas:
-- ✅ Removido fallback sintético na geração de planos quando IA falha (PnboxCreatePlanModal.handleCreateWithAi)
-- ✅ Corrigido retorno de `sucesso: true` em caso de erro no Playwright (playwrightScriptGenerator.ts)
-- ✅ Implementado uso dos endpoints de backend para planos pelo frontend (PlanContext.tsx e PlansContext.tsx)
-- ✅ Corrigidos blocos catch vazios/silenciosos: `PnboxCreatePlanModal.handleCreateWithAi` agora mostra erro ao usuário via alert; `PnboxAiCopilotDrawer.handleSendMessage` já exibia mensagem de erro no chat sem aplicar dados falsos
-- ❌ Ainda pendente: impedir uso de dados sintéticos quando IA retornar vazio para uma ferramenta (geminiDeepResearch.ts linha 309) — aguardando conclusão da task de backend
-
---- 
-
-*Fim do documento*
+*Fim do documento de Auditoria Funcional*

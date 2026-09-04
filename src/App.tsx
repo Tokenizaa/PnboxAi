@@ -281,17 +281,11 @@ try {
     });
 
     try {
-      // Garante que temos dados das 14 ferramentas
-      const dadosParaEnviar = planoAtivo.dados14Ferramentas || SchemaGenerator.gerarTodosOsSchemas(
-        {
-          nomeEmpresa: planoAtivo.nomePlano,
-          setor: planoAtivo.setor,
-          resumoExecutivo: planoAtivo.descricao,
-          cidadeUf: planoAtivo.cidadeUf,
-          orcamentoEstimado: 85000
-        },
-        planoAtivo.idPlano
-      );
+      // Garante que temos dados das 14 ferramentas reais
+      const dadosParaEnviar = planoAtivo.dados14Ferramentas;
+      if (!dadosParaEnviar || Object.keys(dadosParaEnviar).length === 0 || Object.values(dadosParaEnviar).every(arr => !arr || arr.length === 0)) {
+        throw new Error('O plano não possui ferramentas preenchidas. Clique em "Preencher Plano com IA" para gerar dados reais antes de sincronizar.');
+      }
 
       const token = platformToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -357,43 +351,69 @@ try {
       icon: 'loading'
     });
 
-try {
-       const prompt = `Gere sugestões práticas e prontas para a ferramenta "${ferramentaId}" da empresa "${planoAtivo.nomePlano}" no setor "${planoAtivo.setor}".`;
-       const res = await fetch('/api/ai/deep-research', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-           ideiaNegocio: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Ferramenta: ${ferramentaId}`,
-           cidadeUf: planoAtivo.cidadeUf,
-           orcamentoEstimado: 85000,
-           provider: 'gemini'
-         })
-       });
+    try {
+      const prompt = `Gere sugestões práticas e prontas para a ferramenta "${ferramentaId}" da empresa "${planoAtivo.nomePlano}" no setor "${planoAtivo.setor}".`;
+      const res = await fetch('/api/ai/deep-research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Ferramenta: ${ferramentaId}`,
+          ideiaNegocio: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Ferramenta: ${ferramentaId}`,
+          cidadeUf: planoAtivo.cidadeUf,
+          orcamentoEstimado: 85000,
+          provider: 'gemini'
+        })
+      });
 
-       if (!res.ok) {
-         throw new Error(`AI research failed with status ${res.status}`);
-       }
-       const data = await res.json();
-       if (!data.report?.resumoExecutive) {
-         throw new Error('AI returned empty report');
-       }
-       const novoItem = {
-         descricao: `Sugestão Gemini: ${planoAtivo.nomePlano}`,
-         detalheVisual: data.report.resumoExecutive,
-         idPlano: planoAtivo.idPlano
-       };
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.mensagem || `Falha na requisição de IA (status ${res.status})`);
+      }
+      const data = await res.json();
+      const resumo = data.report?.resumoExecutivo || data.report?.oportunidadeMercado;
+      if (!resumo) {
+        throw new Error('IA retornou relatório sem conteúdo aproveitável');
+      }
 
-       const itensAtuais = getItensFerramentaAtiva();
-       handleSaveToolItems([...itensAtuais, novoItem]);
+      const novoItem: Record<string, unknown> = {
+        idPlano: planoAtivo.idPlano,
+        descricao: `Sugestão Copiloto IA: ${planoAtivo.nomePlano}`,
+        detalheVisual: resumo
+      };
 
-       pushToast({
-         level: 'success',
-         title: 'Sugestão Gerada!',
-         message: 'Novo item adicionado à ferramenta com sucesso.',
-         duration: 4000,
-         icon: 'check'
-       });
-     } catch (err) {
+      if (ferramentaId === 'geradorPersonas' && data.report?.buyerPersona) {
+        const p = data.report.buyerPersona;
+        novoItem.nome = p.nome;
+        novoItem.idade = p.idade;
+        novoItem.profissao = p.perfil;
+        novoItem.dores = p.dores?.join('; ');
+        novoItem.objetivos = p.desejos?.join('; ');
+        novoItem.renda = `Ticket Médio R$ ${p.ticketMedio}`;
+      } else if (ferramentaId === 'analiseConcorrencia' && data.report?.concorrentesMapeados?.length > 0) {
+        const c = data.report.concorrentesMapeados[0];
+        novoItem.nomeConcorrente = c.nome;
+        novoItem.concorrente = c.nome;
+        novoItem.pontosFortes = c.pontosFortes;
+        novoItem.pontosFracos = c.pontosFracos;
+        novoItem.diferencial = c.diferenciacao;
+      } else if (ferramentaId === 'segmentacaoMercado') {
+        novoItem.descricao = `Segmento Alvo: ${data.report?.buyerPersona?.perfil || planoAtivo.setor}`;
+        novoItem.segmento = data.report?.buyerPersona?.perfil || planoAtivo.setor;
+        novoItem.variavel1 = 'Comportamento de Consumo';
+        novoItem.variavel2 = 'Localização / Demografia';
+      }
+
+      const itensAtuais = getItensFerramentaAtiva();
+      handleSaveToolItems([...itensAtuais, novoItem]);
+
+      pushToast({
+        level: 'success',
+        title: 'Sugestão Gerada!',
+        message: 'Novo item adicionado à ferramenta com sucesso via IA real.',
+        duration: 4000,
+        icon: 'check'
+      });
+    } catch (err) {
        pushToast({
          level: 'error',
          title: 'Erro ao gerar sugestão com IA',

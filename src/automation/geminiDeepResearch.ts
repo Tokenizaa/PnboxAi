@@ -160,13 +160,17 @@ RETORNE ESTRITAMENTE UM JSON VÁLIDO no seguinte formato (sem blocos markdown ex
         parsedResult = JSON.parse(match[0]);
       }
     } catch (err: any) {
-      console.warn('[Gemini Deep Research] Erro ao chamar API Gemini, gerando relatório de pesquisa heurístico enriquecido:', err.message);
+      console.error('[Gemini Deep Research] Erro ao chamar API Gemini:', err.message);
+      throw new Error(`[Gemini Deep Research] Falha ao chamar API Gemini: ${err.message}`);
     }
   }
 
-  // Fallback heurístico inteligente caso Gemini não retorne JSON
+  // Falha explícita se Gemini não retornou JSON estruturado - NÃO gerar dados sintéticos
   if (!parsedResult) {
-    parsedResult = gerarPesquisaMercadoHeuristica(promptNegocio, options);
+    throw new Error(
+      `[Gemini Deep Research] Falha ao obter dados válidos da IA para o prompt informado. ` +
+      `Não é permitido gerar relatórios de mercado sintéticos ou fictícios como fallback. Verifique a chave de API e tente novamente.`
+    );
   }
 
   return {
@@ -235,14 +239,14 @@ Você é um motor de geração de dados para o sistema PNBOX do Sebrae.
 Com base no Deep Research de Mercado a seguir, gere os dados estruturados de TODAS as 14 ferramentas do PNBOX.
 
 RELATÓRIO DE DEEP RESEARCH:
-- Nome da Empresa: "${research.nomeNegocioSugerido}"
-- Setor: "${research.setor}"
-- Localização: "${research.cidadeUf}"
-- Resumo: "${research.resumoExecutivo}"
-- Persona: Nome: ${research.buyerPersona.nome}, Idade: ${research.buyerPersona.idade}, Perfil: ${research.buyerPersona.perfil}
-- Investimento Total: R$ ${research.investimentoEstimado.capexTotal}
-- Custos Mensais: R$ ${research.investimentoEstimado.opexMensal}
-- Faturamento Estimado: R$ ${research.investimentoEstimado.faturamentoEstimadoMensal}
+- Nome da Empresa: "${research.nomeNegocioSugerido || 'Nova Empresa'}"
+- Setor: "${research.setor || 'Geral'}"
+- Localização: "${research.cidadeUf || 'Brasil'}"
+- Resumo: "${research.resumoExecutivo || ''}"
+- Persona: Nome: ${research.buyerPersona?.nome || 'Cliente Alvo'}, Idade: ${research.buyerPersona?.idade || '30-45'}, Perfil: ${research.buyerPersona?.perfil || 'Consumidor'}
+- Investimento Total: R$ ${research.investimentoEstimado?.capexTotal || 80000}
+- Custos Mensais: R$ ${research.investimentoEstimado?.opexMensal || 15000}
+- Faturamento Estimado: R$ ${research.investimentoEstimado?.faturamentoEstimadoMensal || 35000}
 - ID do Plano no PNBOX: "${idPlano}"
 
 Instrução Crucial: Retorne um objeto JSON contendo exatamente as 14 chaves das coleções DDP do PNBOX, onde cada chave é um array com 1 a 2 objetos com os campos exatos.
@@ -267,13 +271,25 @@ RETORNE APENAS O JSON (sem markdown):
 
   if (ai) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: promptSintese,
-        config: {
-          responseMimeType: 'application/json'
-        }
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: promptSintese,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+      } catch (firstErr: any) {
+        console.warn('[Gemini Plan Synthesis] Modelo flash ocupado ou com erro, tentando gemini-3.1-pro-preview:', firstErr.message);
+        response = await ai.models.generateContent({
+          model: 'gemini-3.1-pro-preview',
+          contents: promptSintese,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+      }
 
       const text = response.text?.trim() || '';
       const match = text.match(/\{[\s\S]*\}/);
@@ -283,12 +299,16 @@ RETORNE APENAS O JSON (sem markdown):
         return normalizarColecoesPnbox(parsed, idPlano, research);
       }
     } catch (err: any) {
-      console.warn('[Gemini Plan Synthesis] Erro na síntese via API Gemini:', err.message);
+      console.error('[Gemini Plan Synthesis] Erro na síntese via API Gemini:', err.message);
+      throw new Error(`[Gemini Plan Synthesis] Falha na síntese das ferramentas via IA: ${err.message}`);
     }
   }
 
-  // Fallback determinístico de síntese baseado no research
-  return gerarSinteseDeterministica(research, idPlano);
+  // Falha explícita: não é permitido inventar dados sintéticos para preencher ferramentas
+  throw new Error(
+    '[Gemini Plan Synthesis] GEMINI_API_KEY não configurada ou IA não retornou JSON estruturado válido. ' +
+    'Não é permitido gerar dados sintéticos como fallback para as 14 ferramentas.'
+  );
 }
 
 /**

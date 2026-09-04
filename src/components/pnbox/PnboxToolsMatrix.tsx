@@ -170,7 +170,7 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
 
   // Identificar se a ferramenta possui dados gerados ou preenchidos
   const isToolFilled = (toolId: string) => {
-    if (!plano.dados14Ferramentas) return true; // Por padrão mostra completo no Defesai
+    if (!plano.dados14Ferramentas) return false;
     const dados = plano.dados14Ferramentas[toolId];
     return Boolean(dados && dados.length > 0);
   };

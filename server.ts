@@ -1304,7 +1304,6 @@ async function startServer() {
   // 10. IA Deep Research com Gemini e NVIDIA NIM (Multi-provider & 3 Contas)
   app.post('/api/ai/deep-research', async (req, res) => {
     const {
-      prompt,
       cidadeUf,
       orcamentoEstimado,
       publicoAlvo,
@@ -1317,7 +1316,9 @@ async function startServer() {
       nvidiaModel
     } = req.body || {};
 
-    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+    const prompt = (req.body?.prompt || req.body?.ideiaNegocio || '').trim();
+
+    if (!prompt || typeof prompt !== 'string' || prompt.length === 0) {
       return res.status(400).json({ status: 'error', mensagem: 'O prompt da ideia de negócio é obrigatório.' });
     }
 
@@ -1464,8 +1465,14 @@ async function startServer() {
     const planoId = idPlano || ID_PLANO_PADRAO;
 
     try {
-      // Gerar payloads usando o SchemaGenerator oficial
-      const dados14Ferramentas = SchemaGenerator.generateFromResearch(research, planoId);
+      let dados14Ferramentas: Record<string, Record<string, unknown>[]>;
+      if (research.pnboxCollections && Object.keys(research.pnboxCollections).length > 0) {
+        dados14Ferramentas = SchemaGenerator.generateFromResearch(research, planoId);
+      } else {
+        // Sintetizar usando IA real via sintetizar14FerramentasPnbox
+        dados14Ferramentas = await sintetizar14FerramentasPnbox(research, planoId);
+      }
+
       res.json({
         status: 'ok',
         idPlano: planoId,
@@ -1473,7 +1480,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('[API /api/ai/synthesize-plan] Erro:', err);
-      res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao sintetizar dados das 14 ferramentas' });
+      res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao sintetizar dados das 14 ferramentas com IA' });
     }
   });
 

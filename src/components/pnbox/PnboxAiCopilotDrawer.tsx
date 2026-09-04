@@ -80,12 +80,18 @@ export const PnboxAiCopilotDrawer: React.FC<PnboxAiCopilotDrawerProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ideiaNegocio: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Setor: ${planoAtivo.setor}. Cidade: ${planoAtivo.cidadeUf}. Solicitação do usuário: ${prompt}`,
+          prompt: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Setor: ${planoAtivo.setor}. Cidade: ${planoAtivo.cidadeUf}. Solicitação: ${prompt}`,
+          ideiaNegocio: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Setor: ${planoAtivo.setor}. Cidade: ${planoAtivo.cidadeUf}. Solicitação: ${prompt}`,
           cidadeUf: planoAtivo.cidadeUf,
           orcamentoEstimado: 80000,
           provider: 'gemini'
         })
       });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.mensagem || `Erro na chamada de IA (status ${response.status})`);
+      }
 
       const data = await response.json();
 
@@ -93,40 +99,101 @@ export const PnboxAiCopilotDrawer: React.FC<PnboxAiCopilotDrawerProps> = ({
       let actionPayload;
 
       if (prompt.toLowerCase().includes('persona')) {
-        aiText = `Para **${planoAtivo.nomePlano}**, recomendo duas personas estratégicas: 1. Gestores de frotas comerciais que buscam mitigar multas NIC repetidas; 2. Motoristas autônomos ou de app que dependem da CNH limpa.`;
-        actionPayload = {
-          toolId: 'geradorPersonas',
-          label: 'Aplicar Personas no Plano',
-          data: [
-            {
-              idPlano: planoAtivo.idPlano,
-              nome: 'Carlos Eduardo Mendes',
-              profissao: 'Gestor de Frotas PME',
-              idade: '41 anos',
-              dores: 'Multas NIC multiplicadas gerando custos descontrolados'
-            }
-          ]
-        };
+        const p = data.report?.buyerPersona;
+        if (p) {
+          aiText = `Para **${planoAtivo.nomePlano}**, mapeei a persona estratégica ideal com base em dados de mercado:\n\n` +
+            `• **Nome:** ${p.nome} (${p.idade})\n` +
+            `• **Perfil:** ${p.perfil}\n` +
+            `• **Principais Dores:** ${p.dores?.join('; ')}\n` +
+            `• **Desejos & Metas:** ${p.desejos?.join('; ')}\n` +
+            `• **Ticket Médio:** R$ ${p.ticketMedio}`;
+          actionPayload = {
+            toolId: 'geradorPersonas',
+            label: 'Aplicar Persona no Plano',
+            data: [
+              {
+                idPlano: planoAtivo.idPlano,
+                nome: p.nome,
+                profissao: p.perfil?.split(',')[0] || 'Cliente Alvo',
+                idade: p.idade,
+                dores: p.dores?.join('; ') || '',
+                objetivos: p.desejos?.join('; ') || '',
+                renda: `Ticket médio R$ ${p.ticketMedio}`
+              }
+            ]
+          };
+        } else {
+          aiText = data.report?.resumoExecutivo || `Não foram identificados dados de persona para ${planoAtivo.nomePlano}.`;
+        }
       } else if (prompt.toLowerCase().includes('concorr')) {
-        aiText = `Análise competitiva: O mercado tem despachantes tradicionais (caros e analógicos) e sites com modelos prontos genéricos (alta taxa de indeferimento). Seu diferencial com IA é a análise personalizada do auto em segundos com custo 5x menor.`;
+        const concs = data.report?.concorrentesMapeados;
+        if (concs && concs.length > 0) {
+          aiText = `Mapeamento competitivo para **${planoAtivo.nomePlano}**:\n\n` +
+            concs.map((c: any) => `• **${c.nome}**\n  - Fortes: ${c.pontosFortes}\n  - Fracos: ${c.pontosFracos}\n  - Diferencial: ${c.diferenciacao}`).join('\n\n');
+          actionPayload = {
+            toolId: 'analiseConcorrencia',
+            label: 'Aplicar Análise de Concorrência',
+            data: concs.map((c: any) => ({
+              idPlano: planoAtivo.idPlano,
+              nomeConcorrente: c.nome,
+              concorrente: c.nome,
+              pontosFortes: c.pontosFortes,
+              pontosFracos: c.pontosFracos,
+              diferencial: c.diferenciacao
+            }))
+          };
+        } else {
+          aiText = data.report?.oportunidadeMercado || `Análise competitiva detalhada para ${planoAtivo.nomePlano}.`;
+        }
+      } else if (prompt.toLowerCase().includes('swot')) {
+        const tendencias = data.report?.tendencias2025_2026 || [];
+        aiText = `Matriz SWOT estratégica para **${planoAtivo.nomePlano}**:\n\n` +
+          `• **Forças:** Modelo focado em inovação para ${planoAtivo.setor}.\n` +
+          `• **Fraquezas:** Fase inicial de estruturação de marca.\n` +
+          `• **Oportunidades:** ${tendencias[0] || data.report?.oportunidadeMercado || 'Crescimento de mercado'}\n` +
+          `• **Ameaças:** Concorrentes consolidados na região.`;
         actionPayload = {
-          toolId: 'analiseConcorrencia',
-          label: 'Aplicar Análise de Concorrência',
+          toolId: 'analiseSwot',
+          label: 'Aplicar SWOT no Plano',
           data: [
             {
               idPlano: planoAtivo.idPlano,
-              nomeConcorrente: 'Despachantes Tradicionais',
-              pontosFortes: 'Atendimento presencial',
-              pontosFracos: 'Lentidão e custos elevados',
-              diferencial: 'IA em tempo real e preço acessível'
+              forcas: `Modelo focado em inovação para ${planoAtivo.setor}`,
+              fraquezas: 'Fase inicial de estruturação de marca',
+              oportunidades: tendencias[0] || 'Crescimento de demanda no segmento',
+              ameacas: 'Pressão de concorrentes estabelecidos'
             }
           ]
         };
+      } else if (prompt.toLowerCase().includes('financ') || prompt.toLowerCase().includes('invest')) {
+        const inv = data.report?.investimentoEstimado;
+        if (inv) {
+          aiText = `Projeção financeira estimada para **${planoAtivo.nomePlano}**:\n\n` +
+            `• **Investimento Inicial (CAPEX):** R$ ${inv.capexTotal?.toLocaleString('pt-BR')}\n` +
+            `• **Custos Fixos Mensais (OPEX):** R$ ${inv.opexMensal?.toLocaleString('pt-BR')}\n` +
+            `• **Faturamento Mensal Estimado:** R$ ${inv.faturamentoEstimadoMensal?.toLocaleString('pt-BR')}\n` +
+            `• **Payback Estimado:** ${inv.pontoEquilibrioMeses} meses`;
+          actionPayload = {
+            toolId: 'indicadoresViabilidade',
+            label: 'Aplicar Finanças no Plano',
+            data: [
+              {
+                idPlano: planoAtivo.idPlano,
+                faturamentoTotalMensal: inv.faturamentoEstimadoMensal,
+                custosTotaisMensais: inv.opexMensal,
+                pontoEquilibrioMensal: inv.opexMensal,
+                prazoRetornoMeses: inv.pontoEquilibrioMeses
+              }
+            ]
+          };
+        } else {
+          aiText = data.report?.resumoExecutivo || 'Dados financeiros calculados a partir da pesquisa de mercado.';
+        }
       } else {
         if (data.report?.resumoExecutivo) {
           aiText = data.report.resumoExecutivo;
         } else {
-          aiText = `Analisei seu negócio **${planoAtivo.nomePlano}**. Sua proposta de valor possui forte aderência com alto potencial de escala digital no Brasil. Deseja preencher todas as 14 ferramentas oficiais do Sebrae agora com base nessa modelagem?`;
+          aiText = `Analisei seu negócio **${planoAtivo.nomePlano}**. Sua proposta de valor possui forte aderência com alto potencial de escala no segmento ${planoAtivo.setor}.`;
         }
       }
 
@@ -139,9 +206,16 @@ export const PnboxAiCopilotDrawer: React.FC<PnboxAiCopilotDrawerProps> = ({
       };
 
       setMessages((prev) => [...prev, aiMsg]);
-} catch {
-       console.error('Erro ao chamar a IA');
-     } finally {
+    } catch (err) {
+      console.error('Erro ao chamar a IA:', err);
+      const errMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'ai',
+        text: `Não foi possível consultar a IA: ${err instanceof Error ? err.message : 'Erro de conexão'}. Verifique sua configuração e tente novamente.`,
+        timestamp: 'Agora'
+      };
+      setMessages((prev) => [...prev, errMsg]);
+    } finally {
        setIsLoading(false);
      }
   };

@@ -298,6 +298,97 @@ export class DdpClient extends EventEmitter {
     });
   }
 
+  /**
+   * Subscreve em uma publicação e coleta todos os documentos enviados via 'added'
+   * até o evento 'ready' ou timeout.
+   */
+  async subscribeAndCollect<T = Record<string, any>>(
+    name: string,
+    params: any[] = [],
+    collectionName?: string,
+    timeoutMs?: number
+  ): Promise<T[]> {
+    if (!this.isConnected()) throw new Error('[DDP] não conectado');
+
+    const id = randomUUID();
+    const effectiveTimeout = timeoutMs || this.opts.timeoutMs;
+    const docsMap = new Map<string, T>();
+
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+
+      const cleanupListeners = () => {
+        this.removeListener('collection', onCollection);
+        clearTimeout(timer);
+        this.subscriptions.delete(id);
+      };
+
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          cleanupListeners();
+          // Se não recebeu ready mas coletou documentos, retorna os documentos obtidos
+          if (docsMap.size > 0) {
+            resolve(Array.from(docsMap.values()));
+          } else {
+            reject(new Error(`[DDP sub ${name}] timeout após ${effectiveTimeout}ms aguardando resposta`));
+          }
+        }
+      }, effectiveTimeout);
+
+      const onCollection = (msg: any) => {
+        if (msg.msg === 'added' || msg.msg === 'addedBefore') {
+          if (!collectionName || msg.collection === collectionName) {
+            docsMap.set(msg.id, {
+              _id: msg.id,
+              ...(msg.fields || {})
+            } as unknown as T);
+          }
+        } else if (msg.msg === 'changed') {
+          if (!collectionName || msg.collection === collectionName) {
+            const existing = docsMap.get(msg.id) || ({ _id: msg.id } as any);
+            docsMap.set(msg.id, {
+              ...existing,
+              ...(msg.fields || {})
+            });
+          }
+        } else if (msg.msg === 'removed') {
+          if (!collectionName || msg.collection === collectionName) {
+            docsMap.delete(msg.id);
+          }
+        }
+      };
+
+      this.on('collection', onCollection);
+
+      const sub: DdpSubscription = {
+        resolve: () => {
+          if (!resolved) {
+            resolved = true;
+            cleanupListeners();
+            resolve(Array.from(docsMap.values()));
+          }
+        },
+        reject: (e) => {
+          if (!resolved) {
+            resolved = true;
+            cleanupListeners();
+            reject(e);
+          }
+        },
+        ready: false
+      };
+      this.subscriptions.set(id, sub);
+
+      this.sendRaw({
+        msg: 'sub',
+        id,
+        name,
+        params
+      });
+    });
+  }
+
   close() {
     this.closedByUser = true;
     this.cleanup();

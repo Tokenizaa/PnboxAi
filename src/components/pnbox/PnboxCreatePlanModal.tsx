@@ -66,6 +66,7 @@ export const PnboxCreatePlanModal: React.FC<PnboxCreatePlanModalProps> = ({
   const [orcamento, setOrcamento] = useState<number>(80000);
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusProgress, setStatusProgress] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -75,22 +76,25 @@ export const PnboxCreatePlanModal: React.FC<PnboxCreatePlanModalProps> = ({
     setDescricao(preset.descricao);
     setCidadeUf(preset.cidade);
     setOrcamento(preset.orcamento);
+    setErrorMessage(null);
   };
 
   const handleCreateWithAi = async () => {
     if (!nomePlano.trim() || !descricao.trim()) {
-      alert('Por favor, preencha o nome e a descrição do negócio.');
+      setErrorMessage('Por favor, preencha o nome e a descrição do negócio.');
       return;
     }
 
+    setErrorMessage(null);
     setIsGenerating(true);
-    setStatusProgress('Iniciando pesquisa de mercado com Gemini Deep Research...');
+    setStatusProgress('Iniciando pesquisa de mercado com IA Gemini Deep Research...');
 
     try {
       const response = await fetch('/api/ai/deep-research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          prompt: `${nomePlano} - ${descricao}`,
           ideiaNegocio: `${nomePlano} - ${descricao}`,
           cidadeUf,
           orcamentoEstimado: orcamento,
@@ -98,44 +102,62 @@ export const PnboxCreatePlanModal: React.FC<PnboxCreatePlanModalProps> = ({
         })
       });
 
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        throw new Error(errorJson.mensagem || `Erro na pesquisa IA: status ${response.status}`);
+      }
+
       const data = await response.json();
-      setStatusProgress('Pesquisa concluída! Estruturando schemas oficiais do Sebrae...');
+      if (!data.report) {
+        throw new Error('A IA não retornou um relatório de pesquisa válido.');
+      }
+
+      setStatusProgress('Pesquisa concluída! Sintetizando as 14 ferramentas com IA...');
 
       const idGerado = `plano_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const dados14 = SchemaGenerator.gerarTodosOsSchemas(
-        data.report || {
-          nomeEmpresa: nomePlano,
-          setor,
-          resumoExecutivo: descricao,
-          cidadeUf,
-          orcamentoEstimado: orcamento
-        },
-        idGerado
-      );
+      const synthResponse = await fetch('/api/ai/synthesize-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          research: data.report,
+          idPlano: idGerado
+        })
+      });
+
+      let dados14: Record<string, Record<string, unknown>[]> = {};
+      if (synthResponse.ok) {
+        const synthData = await synthResponse.json();
+        dados14 = synthData.dados14Ferramentas || {};
+      } else {
+        const errJson = await synthResponse.json().catch(() => ({}));
+        throw new Error(errJson.mensagem || 'Falha na síntese das ferramentas via IA.');
+      }
+
+      const countFilled = Object.values(dados14).filter(arr => Array.isArray(arr) && arr.length > 0).length;
 
       const novoPlano: PlanoCriadoInfo = {
         idPlano: idGerado,
         nomePlano,
-        setor: setor || 'Serviços & Inovação',
+        setor: setor || data.report.setor || 'Serviços & Inovação',
         descricao,
         cidadeUf,
         criadoEm: new Date().toISOString(),
-        status: 'preenchido_completo',
+        status: countFilled === 14 ? 'preenchido_completo' : 'criado_local',
         metodoCriacao: 'ddp_direct',
         pesquisaMercado: data.report,
         dados14Ferramentas: dados14,
-        ferramentasPreenchidas: 14,
+        ferramentasPreenchidas: countFilled,
         categoriaObjetivo: 'Criar um novo negócio'
       };
 
       onPlanCreated(novoPlano);
       onClose();
-} catch (err) {
-       console.error(err);
-       alert('Falha ao gerar plano com IA: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
-     } finally {
-       setIsGenerating(false);
-     }
+    } catch (err) {
+      console.error('[PnboxCreatePlanModal] Erro ao criar plano:', err);
+      setErrorMessage('Falha ao gerar plano com IA: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -258,6 +280,13 @@ export const PnboxCreatePlanModal: React.FC<PnboxCreatePlanModalProps> = ({
           <div className="mt-4 p-3 bg-pink-900/20 border border-pink-500/30 rounded-lg flex items-center gap-2.5 text-xs text-pink-200">
             <RefreshCw className="w-4 h-4 animate-spin text-pink-400" />
             <span>{statusProgress}</span>
+          </div>
+        )}
+
+        {/* Mensagem de Erro */}
+        {errorMessage && (
+          <div className="mt-4 p-3 bg-red-900/30 border border-red-500/40 rounded-lg text-xs text-red-200">
+            {errorMessage}
           </div>
         )}
 
