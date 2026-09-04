@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { ResearchEngine } from '../../src/research/ResearchEngine.ts';
+import { DatabaseSkill } from '../../src/skills/database/index.ts';
+import { prepararEstruturaExecucao, executarLote, BatchExecutionSummary, DdpAuthContext } from '../../src/automation/realRunner.ts';
+import { TEMPLATES_NEGOCIO } from '../../src/automation/businessTemplates.ts';
+import { FERRAMENTAS_PNBOX } from '../../src/automation/schemaCatalog.ts';
+import { obterSessaoUsuario } from '../../src/automation/auth.ts';
 
 const router = Router();
+const db = new DatabaseSkill();
 
 // 10.1 IA Deep Research V2 - Research Engine Agentic com Evidence Store
 router.post('/ai/deep-research-v2', async (req, res) => {
@@ -138,16 +144,16 @@ router.post('/automation/fill-batch', async (req, res) => {
     });
   }
 
-  // Validate dados field - should be an object or array
-  if (dados !== undefined && typeof dados !== 'object') {
+  // Validate dados field - should be a non-null object or array
+  if (dados !== null && dados !== undefined && typeof dados !== 'object') {
     return res.status(400).json({
       status: 'error',
       mensagem: 'O campo dados deve ser um objeto ou array.'
     });
   }
 
-  // Validate customData field - should be an object if provided
-  if (customData !== undefined && typeof customData !== 'object') {
+  // Validate customData field - should be a non-null object if provided
+  if (customData !== null && customData !== undefined && typeof customData !== 'object') {
     return res.status(400).json({
       status: 'error',
       mensagem: 'O campo customData deve ser um objeto.'
@@ -155,10 +161,14 @@ router.post('/automation/fill-batch', async (req, res) => {
   }
 
   try {
-    // Import automation utilities
-    const { prepararEstruturaExecucao, executarLote } = await import('../../src/automation/realRunner.ts');
-    const { TEMPLATES_NEGOCIO } = await import('../../src/automation/businessTemplates.ts');
-    const { FERRAMENTAS_PNBOX } = await import('../../src/automation/schemaCatalog.ts');
+    // Get user ID from JWT token (set by authMiddleware)
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        status: 'error',
+        mensagem: 'Usuário não autenticado. Token JWT inválido ou ausente.'
+      });
+    }
 
     // Find the template
     const template = TEMPLATES_NEGOCIO.find(t => t.id === templateId);
@@ -169,9 +179,25 @@ router.post('/automation/fill-batch', async (req, res) => {
       });
     }
 
-    // Prepare execution structure with real data processing
-    const batchConfig = prepararEstruturaExecucao(templateId, idPlano);
+    // Get user's PNBOX session
+    const sessao = obterSessaoUsuario(userId);
     
+    // Check if we have a valid session
+    if (!sessao) {
+      return res.status(401).json({
+        status: 'error',
+        mensagem: 'Sessão PNBOX não encontrada. Por favor, conecte-se ao PNBOX primeiro usando o endpoint /api/pnbox/connect'
+      });
+    }
+    
+    // Check if session is expired
+    if (new Date(sessao.expiraEm).getTime() <= Date.now()) {
+      return res.status(401).json({
+        status: 'error',
+        mensagem: 'Sessão PNBOX expirada. Por favor, reconecte-se ao PNBOX usando o endpoint /api/pnbox/connect'
+      });
+    }
+
     // Process dados and customData if provided
     let processedData = {};
     if (dados) {
@@ -181,17 +207,26 @@ router.post('/automation/fill-batch', async (req, res) => {
       processedData = { ...processedData, ...customData };
     }
 
-    // In a real implementation, we would get the user's authentication context from the request
-    // For this example, we'll assume the user has already authenticated and we have their credentials
-    // In a production environment, this would come from the JWT token or session
-    
-    // For now, we'll return an error indicating that authentication is required
-    // In a real implementation, we would extract the user ID from the JWT token
-    // and use the pnboxOidcLoginViaPlaywright function to get authenticated context
-    
-    res.status(501).json({
-      status: 'error',
-      mensagem: 'Autenticação PNBOX necessária. Por favor, conecte-se ao PNBOX primeiro usando o endpoint /api/pnbox/connect'
+    // Create DDP authentication context from PNBOX session
+    const authContext: DdpAuthContext = {
+      cookies: sessao.cookiesPnbox,
+      loginToken: sessao.idToken,
+      userId: sessao.meteorUserId || userId, // Use meteorUserId if available, fallback to platform userId
+      connectionId: `${userId}_pnbox_${Date.now()}`
+    };
+
+    // Execute the batch with real PNBOX connection
+    const result: BatchExecutionSummary = await executarLote(
+      templateId,
+      processedData,
+      idPlano,
+      authContext
+    );
+
+    // Return the actual execution results
+    res.json({
+      status: 'ok',
+      data: result
     });
   } catch (err: any) {
     console.error('[API /api/automation/fill-batch] Erro:', err);
