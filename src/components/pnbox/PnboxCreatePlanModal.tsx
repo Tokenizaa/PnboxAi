@@ -130,40 +130,12 @@ export const PnboxCreatePlanModal: React.FC<PnboxCreatePlanModalProps> = ({
 
       onPlanCreated(novoPlano);
       onClose();
-    } catch (err) {
-      console.error(err);
-      // Fallback local se a API demorar
-      const idGerado = `plano_${Date.now().toString(36)}`;
-      const dadosFallback = SchemaGenerator.gerarTodosOsSchemas(
-        {
-          nomeEmpresa: nomePlano,
-          setor: setor || 'Serviços',
-          resumoExecutivo: descricao,
-          cidadeUf,
-          orcamentoEstimado: orcamento
-        },
-        idGerado
-      );
-
-      const novoPlano: PlanoCriadoInfo = {
-        idPlano: idGerado,
-        nomePlano,
-        setor: setor || 'Serviços',
-        descricao,
-        cidadeUf,
-        criadoEm: new Date().toISOString(),
-        status: 'preenchido_completo',
-        metodoCriacao: 'ddp_direct',
-        dados14Ferramentas: dadosFallback,
-        ferramentasPreenchidas: 14,
-        categoriaObjetivo: 'Criar um novo negócio'
-      };
-
-      onPlanCreated(novoPlano);
-      onClose();
-    } finally {
-      setIsGenerating(false);
-    }
+} catch (err) {
+       console.error(err);
+       alert('Falha ao gerar plano com IA: ' + (err instanceof Error ? err.message : 'Erro desconhecido'));
+     } finally {
+       setIsGenerating(false);
+     }
   };
 
   return (

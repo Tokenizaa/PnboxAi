@@ -129,14 +129,16 @@ export async function pnboxOidcLoginViaPlaywright(
         console.log('[OIDC/Playwright] Clicando em "Entrar"...');
         await entrarBtn.click({ force: true });
         
-        // Aguardar transição para a URL de SSO da AMEI / Keycloak
-        await page.waitForURL(
-          (url) => {
-            const u = url.toString();
-            return u.includes('amei.sebrae.com.br') || u.includes('login') || u.includes('auth');
-          },
-          { timeout: 25000 }
-        ).catch(() => {});
+// Aguardar transição para a URL de SSO da AMEI / Keycloak
+         await page.waitForURL(
+           (url) => {
+             const u = url.toString();
+             return u.includes('amei.sebrae.com.br') || u.includes('login') || u.includes('auth');
+           },
+           { timeout: 25000 }
+         ).catch((err: any) => {
+           console.error('[OIDC/Playwright] waitForURL timeout waiting for SSO redirect:', err.message);
+         });
       } catch (e: any) {
         console.warn('[OIDC/Playwright] Aviso ao procurar/clicar botão Entrar:', e.message);
       }
@@ -168,11 +170,13 @@ export async function pnboxOidcLoginViaPlaywright(
     await page.fill('input[name="username"], input#username', cpf);
     await page.fill('input[name="password"], input#password', password);
 
-    // Marcar "Lembre-se de mim" se houver
-    const rememberCheckbox = page.locator('input[name="rememberMe"]');
-    if (await rememberCheckbox.count() > 0) {
-      await rememberCheckbox.check().catch(() => {});
-    }
+// Marcar "Lembre-se de mim" se houver
+     const rememberCheckbox = page.locator('input[name="rememberMe"]');
+     if (await rememberCheckbox.count() > 0) {
+       await rememberCheckbox.check().catch((err: any) => {
+         console.error('[OIDC/Playwright] Failed to check rememberMe checkbox:', err.message);
+       });
+     }
 
     // ETAPA 3: Submeter formulário
     console.log('[OIDC/Playwright] Submetendo formulário de login...');
@@ -224,9 +228,11 @@ export async function pnboxOidcLoginViaPlaywright(
       throw new Error(`[Sebrae ID] ${authError}`);
     }
 
-    // ETAPA 5: Aguardar PNBOX carregar e armazenar tokens Meteor
-    report('obtaining_session');
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+// ETAPA 5: Aguardar PNBOX carregar e armazenar tokens Meteor
+     report('obtaining_session');
+     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch((err: any) => {
+       console.error('[OIDC/Playwright] waitForLoadState networkidle timeout:', err.message);
+     });
 
     // ETAPA 6: Extrair tokens Meteor do localStorage ou memória
     let meteorData: { loginToken: string | null; userId: string | null; loginTokenExpires: string | null; xMtok?: string } = {
@@ -239,34 +245,41 @@ export async function pnboxOidcLoginViaPlaywright(
     // Esperar app PNBOX inicializar e popular Meteor (pode demorar após redirect)
     const startExtractTime = Date.now();
     while (Date.now() - startExtractTime < 30000) {
-      const extracted = await page.evaluate(() => {
-        const storage = (() => {
-          try { return localStorage; } catch { return null; }
-        })();
-        const tok = storage?.getItem('Meteor.loginToken') || (window as any).Meteor?.default_connection?._loginToken;
-        const uId = storage?.getItem('Meteor.userId') || (window as any).Meteor?.userId?.();
-        const exp = storage?.getItem('Meteor.loginTokenExpires');
-        const xMtok = document.cookie.split('; ').find(c => c.startsWith('x_mtok='))?.split('=')[1] || '';
-        return { loginToken: tok || null, userId: uId || null, loginTokenExpires: exp || null, xMtok };
-      }).catch(() => null);
+const extracted = await page.evaluate(() => {
+         const storage = (() => {
+           try { return localStorage; } catch { return null; }
+         })();
+         const tok = storage?.getItem('Meteor.loginToken') || (window as any).Meteor?.default_connection?._loginToken;
+         const uId = storage?.getItem('Meteor.userId') || (window as any).Meteor?.userId?.();
+         const exp = storage?.getItem('Meteor.loginTokenExpires');
+         const xMtok = document.cookie.split('; ').find(c => c.startsWith('x_mtok='))?.split('=')[1] || '';
+         return { loginToken: tok || null, userId: uId || null, loginTokenExpires: exp || null, xMtok };
+       }).catch((err: any) => {
+         console.error('[OIDC/Playwright] page.evaluate failed to extract Meteor tokens:', err.message);
+         return null;
+       });
 
       if (extracted?.loginToken && extracted?.userId) {
         meteorData = extracted;
         break;
       }
-      // Recarregar se Meteor ainda não inicializou (SPA pode precisar de reload)
-      if (Date.now() - startExtractTime > 12000 && !/pnbox\.sebrae\.com\.br\/?$/.test(page.url())) {
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-      }
+// Recarregar se Meteor ainda não inicializou (SPA pode precisar de reload)
+       if (Date.now() - startExtractTime > 12000 && !/pnbox\.sebrae\.com\.br\/?$/.test(page.url())) {
+         await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch((err: any) => {
+           console.error('[OIDC/Playwright] page.reload failed during token extraction wait:', err.message);
+         });
+       }
       await page.waitForTimeout(800);
     }
 
-    if (!meteorData.loginToken || !meteorData.userId) {
-      const debugPath = `/tmp/pnbox-notoken-${Date.now()}.png`;
-      await page.screenshot({ path: debugPath, fullPage: true }).catch(() => {});
-      console.error(`[OIDC/Playwright] Token Meteor não encontrado após 30s. URL: ${page.url()}. Screenshot: ${debugPath}`);
-      throw new Error(`[OIDC/Playwright] O login no Sebrae ID foi validado, mas a sessão do PNBOX não foi obtida no navegador. URL final: ${page.url().substring(0, 80)}.`);
-    }
+if (!meteorData.loginToken || !meteorData.userId) {
+       const debugPath = `/tmp/pnbox-notoken-${Date.now()}.png`;
+       await page.screenshot({ path: debugPath, fullPage: true }).catch((err: any) => {
+         console.error('[OIDC/Playwright] Failed to take debug screenshot:', err.message);
+       });
+       console.error(`[OIDC/Playwright] Token Meteor não encontrado após 30s. URL: ${page.url()}. Screenshot: ${debugPath}`);
+       throw new Error(`[OIDC/Playwright] O login no Sebrae ID foi validado, mas a sessão do PNBOX não foi obtida no navegador. URL final: ${page.url().substring(0, 80)}.`);
+     }
 
     console.log(`[OIDC/Playwright] Meteor tokens capturados com sucesso: userId=${meteorData.userId}`);
 
@@ -299,16 +312,22 @@ export async function pnboxOidcLoginViaPlaywright(
       meteorLoginToken: meteorData.loginToken,
       meteorUserId: meteorData.userId
     } as any;
-  } finally {
-    // SEMPRE fechar o navegador — é a fonte do risco de segurança
-    try {
-      if (page) await page.close();
-    } catch {}
-    try {
-      if (context) await context.close();
-    } catch {}
-    try {
-      if (browser) await browser.close();
-    } catch {}
-  }
+} finally {
+     // SEMPRE fechar o navegador — é a fonte do risco de segurança
+     try {
+       if (page) await page.close();
+     } catch (err: any) {
+       console.error('[OIDC/Playwright] Failed to close page:', err.message, err.stack);
+     }
+     try {
+       if (context) await context.close();
+     } catch (err: any) {
+       console.error('[OIDC/Playwright] Failed to close context:', err.message, err.stack);
+     }
+     try {
+       if (browser) await browser.close();
+     } catch (err: any) {
+       console.error('[OIDC/Playwright] Failed to close browser:', err.message, err.stack);
+     }
+   }
 }

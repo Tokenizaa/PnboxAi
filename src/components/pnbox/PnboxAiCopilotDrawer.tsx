@@ -139,17 +139,11 @@ export const PnboxAiCopilotDrawer: React.FC<PnboxAiCopilotDrawerProps> = ({
       };
 
       setMessages((prev) => [...prev, aiMsg]);
-    } catch {
-      const fallbackMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        sender: 'ai',
-        text: `Compreendi seu objetivo para **${planoAtivo.nomePlano}**. A modelagem recomenda foco em nichos B2B (empresas de frotas) para garantir receita recorrente, enquanto o canal B2C pode ser alimentado por campanhas de busca paga e parcerias com associações.`,
-        timestamp: 'Agora'
-      };
-      setMessages((prev) => [...prev, fallbackMsg]);
-    } finally {
-      setIsLoading(false);
-    }
+} catch {
+       console.error('Erro ao chamar a IA');
+     } finally {
+       setIsLoading(false);
+     }
   };
 
   const quickPrompts = [

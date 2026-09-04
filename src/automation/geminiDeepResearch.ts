@@ -306,8 +306,9 @@ function normalizarColecoesPnbox(
     const items = Array.isArray(raw[colName]) ? raw[colName] : [];
 
     if (items.length === 0) {
-      // Usar fallback para esta ferramenta
-      resultado[colName] = [gerarRegistroFallbackParaFerramenta(f, idPlano, research)];
+      // AI não retornou dados para esta ferramenta — deixar coleção vazia
+      // UI deve exibir "dados pendentes" para esta ferramenta
+      resultado[colName] = [];
     } else {
       resultado[colName] = items.map((item: any) => ({
         ...item,
@@ -496,17 +497,6 @@ function gerarSinteseDeterministica(
       }
     ]
   };
-}
-
-function gerarRegistroFallbackParaFerramenta(
-  f: FerramentaInfo,
-  idPlano: string,
-  research: DeepResearchReport
-): Record<string, unknown> {
-  const base = { ...f.exemploPayload, idPlano };
-  if ('descricao' in base) base.descricao = `${research.nomeNegocioSugerido} - ${research.setor}`;
-  if ('nome' in base) base.nome = research.buyerPersona.nome;
-  return base;
 }
 
 function extrairNomeSugerido(prompt: string): string {

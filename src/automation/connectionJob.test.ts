@@ -70,7 +70,7 @@ function assert(cond: boolean, msg: string): void {
   assert(job.errorCode === 'AUTH_INVALID_CREDENTIALS', '2b: errorCode correto');
   assert(job.steps.some(s => s.step === 'authenticating' && s.status === 'FAILED'), '2c: etapa authenticating marcada FAILED');
   assert(job.completedAt !== undefined, '2d: completedAt definido');
-  assert(job.errorMessage, '2e: errorMessage amigável presente');
+  assert(job.errorMessage !== undefined, '2e: errorMessage amigável presente');
 }
 
 console.log('\nDone.');

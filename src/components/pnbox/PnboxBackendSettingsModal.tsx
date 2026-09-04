@@ -69,7 +69,9 @@ export const PnboxBackendSettingsModal: React.FC<PnboxBackendSettingsModalProps>
       const saved = await getEncryptedPnboxCredentials();
       if (saved?.cpf && !cpf) setCpf(saved.cpf);
       if (saved?.password) setPassword(saved.password);
-    } catch {}
+    } catch (err) {
+      console.error('[PnboxBackendSettingsModal] loadSavedCreds: failed to load saved credentials', err);
+    }
   }, [cpf]);
 
   useEffect(() => {
@@ -136,6 +138,7 @@ export const PnboxBackendSettingsModal: React.FC<PnboxBackendSettingsModalProps>
         type: 'success'
       });
     } catch (err: any) {
+      console.error('[PnboxBackendSettingsModal] handleSalvar: failed to authenticate and save credentials', err);
       setFormMessage({ text: err.message || 'Erro ao conectar', type: 'error' });
     } finally {
       setIsLoading(false);
@@ -168,6 +171,7 @@ export const PnboxBackendSettingsModal: React.FC<PnboxBackendSettingsModalProps>
       setFormMessage({ text: 'Desconectado do PNBOX. Credenciais removidas.', type: 'success' });
       onDisconnect?.();
     } catch (err: any) {
+      console.error('[PnboxBackendSettingsModal] handleDeslogar: failed to logout and clear credentials', err);
       setFormMessage({ text: `Erro ao deslogar: ${err.message}`, type: 'error' });
     }
   };

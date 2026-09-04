@@ -706,8 +706,9 @@ async function startServer() {
                   { onConflict: 'user_id' }
                 )
               : Promise.resolve({ error: null, data: null });
-            if (upsert?.error) {
-              console.warn('[Connect] Falha ao salvar credenciais no banco:', upsert.error.message);
+            if (upsert && 'error' in upsert && upsert.error) {
+              const err = upsert.error as { message?: string };
+              console.warn('[Connect] Falha ao salvar credenciais no banco:', err.message || 'Erro desconhecido');
             } else {
               console.log('[Connect] Credenciais salvas com sucesso. password_enc len:', passwordEnc.length);
             }

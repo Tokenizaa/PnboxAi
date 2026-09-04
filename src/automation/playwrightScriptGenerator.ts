@@ -326,7 +326,7 @@ async function criarNovoPlanoNoPnbox() {
           });
           return { metodo: 'ddp_planos_insert', novoId: novoId || idPlanoSugerido, sucesso: true };
         } catch (e: any) {
-          return { metodo: 'ddp_fallback', novoId: idPlanoSugerido, sucesso: true, motivo: e.message };
+          return { metodo: 'ddp_fallback', novoId: idPlanoSugerido, sucesso: false, motivo: e.message };
         }
       }
       return { metodo: 'browser_eval', novoId: idPlanoSugerido, sucesso: true };

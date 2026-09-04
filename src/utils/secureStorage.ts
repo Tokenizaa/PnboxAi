@@ -6,7 +6,7 @@
 
 export interface SecurePnboxCredentials {
   cpf: string;
-  idPlano: string;
+  idPlano?: string;
   password?: string;
   salvoEm?: string;
 }

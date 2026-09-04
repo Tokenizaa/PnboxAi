@@ -78,14 +78,18 @@ interface PnboxConnectionTimelineProps {
   onConnected?: (job: ConnectionJob) => void;
   onFailed?: (job: ConnectionJob) => void;
   onDisconnect?: () => void;
+  onClose?: () => void;
 }
 
 export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = ({
   isOpen,
+  onClose,
   onConnected,
   onFailed,
   onDisconnect
 }) => {
+  if (!isOpen) return null;
+
   const [cpf, setCpf] = useState('');
   const [password, setPassword] = useState('');
   const [consentimento, setConsentimento] = useState(false);
@@ -140,7 +144,8 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
         activeJobIdRef.current = null;
         onFailed?.(data.job);
       }
-    } catch {
+    } catch (err) {
+      console.error('[PnboxConnectionTimeline] pollStatus: failed to poll job status', err);
       // ignora erros de polling transientes
     }
   }, [onConnected, onFailed]);
@@ -185,7 +190,7 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
         startPolling(data.jobId);
       }
     } catch (err: any) {
-      console.warn('Falha ao iniciar conexão:', err);
+      console.error('[PnboxConnectionTimeline] handleConnect: failed to start connection job', err);
     }
   };
 
@@ -207,7 +212,9 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
       setConsentimento(false);
       setJob(null);
       onDisconnect?.();
-    } catch {}
+    } catch (err) {
+      console.error('[PnboxConnectionTimeline] handleLogout: failed to logout and clear session', err);
+    }
   };
 
   const isRunning = job?.status === 'RUNNING' || job?.status === 'PENDING';
@@ -229,14 +236,23 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
               <p className="text-xs text-indigo-200/80">Conecte sua conta no ambiente oficial Sebrae</p>
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            disabled={!isAuthenticated || isRunning}
-            className="p-1.5 rounded-full hover:bg-white/10 text-red-400 hover:text-red-300 disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Deslogar"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+              title="Fechar"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+            <button
+              onClick={handleLogout}
+              disabled={!isAuthenticated || isRunning}
+              className="p-1.5 rounded-full hover:bg-white/10 text-red-400 hover:text-red-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Deslogar"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="mt-4">

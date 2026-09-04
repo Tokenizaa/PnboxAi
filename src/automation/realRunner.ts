@@ -95,11 +95,13 @@ export async function obterDdpConectado(authContext: DdpAuthContext): Promise<Dd
     return cached.client;
   }
 
-  // Fechar conexão antiga se existir
-  if (cached) {
-    try { cached.client.close(); } catch {}
-    ddpConnectionCache.delete(cacheKey);
-  }
+// Fechar conexão antiga se existir
+   if (cached) {
+     try { cached.client.close(); } catch (err: any) {
+       console.error('[realRunner] obterDdpConectado: Failed to close cached client:', err.message, err.stack);
+     }
+     ddpConnectionCache.delete(cacheKey);
+   }
 
   // Criar nova conexão
   const client = new DdpClient({
@@ -120,7 +122,9 @@ export async function obterDdpConectado(authContext: DdpAuthContext): Promise<Dd
     console.log(`[DDP] Meteor.loginWithToken OK — userId: ${loginResult?.id || authContext.userId}`);
   } catch (err: any) {
     console.error('[DDP] Falha no Meteor.loginWithToken:', err.message);
-    try { client.close(); } catch {}
+    try { client.close(); } catch (closeErr: any) {
+      console.error('[realRunner] obterDdpConectado: Failed to close client after login error:', closeErr.message, closeErr.stack);
+    }
     throw new Error(`Falha ao autenticar DDP com Meteor token: ${err.message}`);
   }
 
@@ -142,13 +146,17 @@ export function fecharDdp(authContext?: DdpAuthContext) {
     const cacheKey = getCacheKey(authContext);
     const cached = ddpConnectionCache.get(cacheKey);
     if (cached) {
-      try { cached.client.close(); } catch {}
+      try { cached.client.close(); } catch (err: any) {
+        console.error('[realRunner] fecharDdp: Failed to close client for user:', authContext.userId, err.message, err.stack);
+      }
       ddpConnectionCache.delete(cacheKey);
     }
   } else {
     // Fechar todas (apenas para shutdown do servidor)
     for (const [_, cached] of ddpConnectionCache) {
-      try { cached.client.close(); } catch {}
+      try { cached.client.close(); } catch (err: any) {
+        console.error('[realRunner] fecharDdp: Failed to close client during shutdown:', err.message, err.stack);
+      }
     }
     ddpConnectionCache.clear();
   }

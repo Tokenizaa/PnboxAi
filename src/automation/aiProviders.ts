@@ -295,35 +295,30 @@ RETORNE ESTRITAMENTE UM JSON VÁLIDO no seguinte formato (sem blocos de texto ex
     console.warn('[AI Deep Research] Nenhuma fonte de pesquisa real detectada na resposta');
   }
 
-  return {
-    promptOriginal: promptNegocio,
-    nomeNegocioSugerido: parsed.nomeNegocioSugerido,
-    setor: parsed.setor || 'Serviços & Comércio',
-    cidadeUf: parsed.cidadeUf || cidadeUf,
-    resumoExecutivo: parsed.resumoExecutivo || '',
-    oportunidadeMercado: parsed.oportunidadeMercado || '',
-    tendencias2025_2026: Array.isArray(parsed.tendencias2025_2026) ? parsed.tendencias2025_2026 : [],
-    concorrentesMapeados: Array.isArray(parsed.concorrentesMapeados) ? parsed.concorrentesMapeados : [],
-    buyerPersona: parsed.buyerPersona || {
-      nome: 'Consumidor Alvo',
-      idade: '30 a 45 anos',
-      perfil: 'Público local qualificado',
-      dores: ['Falta de qualidade'],
-      desejos: ['Melhor experiência'],
-      ticketMedio: 150
-    },
-    investimentoEstimado: parsed.investimentoEstimado || {
-      capexTotal: orcamentoEstimado,
-      opexMensal: 20000,
-      pontoEquilibrioMeses: 12,
-      faturamentoEstimadoMensal: 35000
-    },
-    aspectosLegaisTributarios: parsed.aspectosLegaisTributarios || {
-      cnaeSugerido: 'CNAE Principal',
-      regimeTributario: 'Simples Nacional',
-      licencasExigidas: ['Alvará Municipal']
-    },
-    fontesPesquisa,
-    geradoEm: new Date().toISOString()
-  };
+// Validate all required fields are present and of correct type
+   if (typeof parsed.setor !== 'string') throw new Error('Campo "setor" ausente ou inválido na resposta da IA');
+   if (typeof parsed.cidadeUf !== 'string') throw new Error('Campo "cidadeUf" ausente ou inválido na resposta da IA');
+   if (typeof parsed.resumoExecutivo !== 'string') throw new Error('Campo "resumoExecutivo" ausente ou inválido na resposta da IA');
+   if (typeof parsed.oportunidadeMercado !== 'string') throw new Error('Campo "oportunidadeMercado" ausente ou inválido na resposta da IA');
+   if (!Array.isArray(parsed.tendencias2025_2026) || !parsed.tendencias2025_2026.every(t => typeof t === 'string')) throw new Error('Campo "tendencias2025_2026" ausente ou inválido na resposta da IA');
+   if (!Array.isArray(parsed.concorrentesMapeados) || !parsed.concorrentesMapeados.every(c => c && typeof c.nome === 'string' && typeof c.pontosFortes === 'string' && typeof c.pontosFracos === 'string' && typeof c.diferenciacao === 'string')) throw new Error('Campo "concorrentesMapeados" ausente ou inválido na resposta da IA');
+   if (!parsed.buyerPersona || typeof parsed.buyerPersona.nome !== 'string' || typeof parsed.buyerPersona.idade !== 'string' || typeof parsed.buyerPersona.perfil !== 'string' || !Array.isArray(parsed.buyerPersona.dores) || !parsed.buyerPersona.dores.every(d => typeof d === 'string') || !Array.isArray(parsed.buyerPersona.desejos) || !parsed.buyerPersona.desejos.every(d => typeof d === 'string') || typeof parsed.buyerPersona.ticketMedio !== 'number') throw new Error('Campo "buyerPersona" ausente ou inválido na resposta da IA');
+   if (!parsed.investimentoEstimado || typeof parsed.investimentoEstimado.capexTotal !== 'number' || typeof parsed.investimentoEstimado.opexMensal !== 'number' || typeof parsed.investimentoEstimado.pontoEquilibrioMeses !== 'number' || typeof parsed.investimentoEstimado.faturamentoEstimadoMensal !== 'number') throw new Error('Campo "investimentoEstimado" ausente ou inválido na resposta da IA');
+   if (!parsed.aspectosLegaisTributarios || typeof parsed.aspectosLegaisTributarios.cnaeSugerido !== 'string' || typeof parsed.aspectosLegaisTributarios.regimeTributario !== 'string' || !Array.isArray(parsed.aspectosLegaisTributarios.licencasExigidas) || !parsed.aspectosLegaisTributarios.licencasExigidas.every(l => typeof l === 'string')) throw new Error('Campo "aspectosLegaisTributarios" ausente ou inválido na resposta da IA');
+
+   return {
+     promptOriginal: promptNegocio,
+     nomeNegocioSugerido: parsed.nomeNegocioSugerido,
+     setor: parsed.setor,
+     cidadeUf: parsed.cidadeUf,
+     resumoExecutivo: parsed.resumoExecutivo,
+     oportunidadeMercado: parsed.oportunidadeMercado,
+     tendencias2025_2026: parsed.tendencias2025_2026,
+     concorrentesMapeados: parsed.concorrentesMapeados,
+     buyerPersona: parsed.buyerPersona,
+     investimentoEstimado: parsed.investimentoEstimado,
+     aspectosLegaisTributarios: parsed.aspectosLegaisTributarios,
+     fontesPesquisa,
+     geradoEm: new Date().toISOString()
+   };
 }

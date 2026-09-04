@@ -313,7 +313,9 @@ export class DdpClient extends EventEmitter {
     if (this.ws) {
       try {
         if (this.ws.readyState === WebSocket.OPEN) this.ws.close();
-      } catch {}
+      } catch (err: any) {
+        console.error('[DDP] cleanup: Failed to close websocket:', err.message, err.stack);
+      }
       this.ws = null;
     }
     // rejeitar pendentes

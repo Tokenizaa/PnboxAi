@@ -216,39 +216,26 @@ export function App() {
       icon: 'loading'
     });
 
-    try {
-      // 1. Gera ou sintetiza o relatório com IA
-      const res = await fetch('/api/ai/synthesize-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nomeEmpresa: planoAtivo.nomePlano,
-          setor: planoAtivo.setor,
-          descricao: planoAtivo.descricao,
-          cidadeUf: planoAtivo.cidadeUf,
-          orcamentoEstimado: 85000,
-          idPlano: planoAtivo.idPlano
-        })
-      });
+try {
+       // 1. Gera ou sintetiza o relatório com IA
+       const res = await fetch('/api/ai/synthesize-plan', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           nomeEmpresa: planoAtivo.nomePlano,
+           setor: planoAtivo.setor,
+           descricao: planoAtivo.descricao,
+           cidadeUf: planoAtivo.cidadeUf,
+           orcamentoEstimado: 85000,
+           idPlano: planoAtivo.idPlano
+         })
+       });
 
-      let dadosSintetizados: Record<string, Record<string, unknown>[]>;
-
-      if (res.ok) {
-        const json = await res.json();
-        dadosSintetizados = json.planData;
-      } else {
-        // Fallback robusto usando SchemaGenerator
-        dadosSintetizados = SchemaGenerator.gerarTodosOsSchemas(
-          {
-            nomeEmpresa: planoAtivo.nomePlano,
-            setor: planoAtivo.setor,
-            resumoExecutivo: planoAtivo.descricao,
-            cidadeUf: planoAtivo.cidadeUf,
-            orcamentoEstimado: 85000
-          },
-          planoAtivo.idPlano
-        );
-      }
+       if (!res.ok) {
+         throw new Error(`AI synthesis failed with status ${res.status}`);
+       }
+       const json = await res.json();
+       const dadosSintetizados = json.planData;
 
       // Atualizar o plano na lista
       const planoAtualizado: PlanoCriadoInfo = {
@@ -370,47 +357,53 @@ export function App() {
       icon: 'loading'
     });
 
-    try {
-      const prompt = `Gere sugestões práticas e prontas para a ferramenta "${ferramentaId}" da empresa "${planoAtivo.nomePlano}" no setor "${planoAtivo.setor}".`;
-      const res = await fetch('/api/ai/deep-research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ideiaNegocio: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Ferramenta: ${ferramentaId}`,
-          cidadeUf: planoAtivo.cidadeUf,
-          orcamentoEstimado: 85000,
-          provider: 'gemini'
-        })
-      });
+try {
+       const prompt = `Gere sugestões práticas e prontas para a ferramenta "${ferramentaId}" da empresa "${planoAtivo.nomePlano}" no setor "${planoAtivo.setor}".`;
+       const res = await fetch('/api/ai/deep-research', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           ideiaNegocio: `${planoAtivo.nomePlano} - ${planoAtivo.descricao}. Ferramenta: ${ferramentaId}`,
+           cidadeUf: planoAtivo.cidadeUf,
+           orcamentoEstimado: 85000,
+           provider: 'gemini'
+         })
+       });
 
-      const data = await res.json();
-      const novoItem = {
-        descricao: `Sugestão Gemini: ${planoAtivo.nomePlano}`,
-        detalheVisual: data.report?.resumoExecutivo || `Análise de mercado especializada para ${planoAtivo.setor} validada contra as diretrizes do Sebrae.`,
-        idPlano: planoAtivo.idPlano
-      };
+       if (!res.ok) {
+         throw new Error(`AI research failed with status ${res.status}`);
+       }
+       const data = await res.json();
+       if (!data.report?.resumoExecutive) {
+         throw new Error('AI returned empty report');
+       }
+       const novoItem = {
+         descricao: `Sugestão Gemini: ${planoAtivo.nomePlano}`,
+         detalheVisual: data.report.resumoExecutive,
+         idPlano: planoAtivo.idPlano
+       };
 
-      const itensAtuais = getItensFerramentaAtiva();
-      handleSaveToolItems([...itensAtuais, novoItem]);
+       const itensAtuais = getItensFerramentaAtiva();
+       handleSaveToolItems([...itensAtuais, novoItem]);
 
-      pushToast({
-        level: 'success',
-        title: 'Sugestão Gerada!',
-        message: 'Novo item adicionado à ferramenta com sucesso.',
-        duration: 4000,
-        icon: 'check'
-      });
-    } catch {
-      const fallbackItem = {
-        descricao: `Sugestão Estratégica: ${planoAtivo.nomePlano}`,
-        detalheVisual: `Segmento de alta tração focado em clientes que demandam agilidade digital e suporte 24h em ${planoAtivo.cidadeUf}.`,
-        idPlano: planoAtivo.idPlano
-      };
-      const itensAtuais = getItensFerramentaAtiva();
-      handleSaveToolItems([...itensAtuais, fallbackItem]);
-    } finally {
-      setIsGeneratingAi(false);
-    }
+       pushToast({
+         level: 'success',
+         title: 'Sugestão Gerada!',
+         message: 'Novo item adicionado à ferramenta com sucesso.',
+         duration: 4000,
+         icon: 'check'
+       });
+     } catch (err) {
+       pushToast({
+         level: 'error',
+         title: 'Erro ao gerar sugestão com IA',
+         message: err instanceof Error ? err.message : 'Erro desconhecido',
+         duration: 5000,
+         icon: 'error'
+       });
+     } finally {
+       setIsGeneratingAi(false);
+     }
   };
 
   // Salvar itens editados de uma ferramenta
@@ -553,6 +546,7 @@ export function App() {
       {/* 5. Modal de Conexão PNBOX (Timeline de Progresso) */}
       <PnboxConnectionTimeline
         isOpen={showBackendModal}
+        onClose={() => setShowBackendModal(false)}
         onConnected={(job) => {
           setAuthSession((prev) => ({
             ...prev,
@@ -568,42 +562,46 @@ export function App() {
               ...prev.logs
             ]
           }));
+          setShowBackendModal(false);
           carregarDados();
         }}
-        onFailed={(job) => {
-          setAuthSession((prev) => ({
-            ...prev,
-            status: 'failed',
-            isOnline: false,
-            logs: [
-              {
-                timestamp: new Date().toISOString(),
-                mensagem: `Falha na conexão PNBOX: ${job.errorMessage || 'erro desconhecido'}`,
-                level: 'error'
-              },
-              ...prev.logs
-            ]
-          }));
-        }}
-        onDisconnect={() => {
-          setAuthSession((prev) => ({
-            ...prev,
-            status: 'idle',
-            isExpired: true,
-            isOnline: false,
-            meteorLoginToken: undefined,
-            meteorUserId: undefined,
-            logs: [
-              {
-                timestamp: new Date().toISOString(),
-                mensagem: 'Desconectado do PNBOX.',
-                level: 'info'
-              },
-              ...prev.logs
-            ]
-          }));
-          carregarDados();
-        }}
+onFailed={(job) => {
+  setAuthSession((prev) => ({
+    ...prev,
+    status: 'failed',
+    isOnline: false,
+    logs: [
+      {
+        timestamp: new Date().toISOString(),
+        mensagem: `Falha na conexão PNBOX: ${job.errorMessage || 'erro desconhecido'}`,
+        level: 'error'
+      },
+      ...prev.logs
+    ]
+  }));
+  setShowBackendModal(false);
+  carregarDados();
+}}
+onDisconnect={() => {
+  setAuthSession((prev) => ({
+    ...prev,
+    status: 'idle',
+    isExpired: true,
+    isOnline: false,
+    meteorLoginToken: undefined,
+    meteorUserId: undefined,
+    logs: [
+      {
+        timestamp: new Date().toISOString(),
+        mensagem: 'Desconectado do PNBOX.',
+        level: 'info'
+      },
+      ...prev.logs
+    ]
+  }));
+  setShowBackendModal(false);
+  carregarDados();
+}}
       />
 
       {/* 6. Container de Toasts de Notificação */}
