@@ -246,19 +246,26 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">
-                    CPF / Login Sebrae
+                    CPF (somente números)
                   </label>
                   <input
                     type="text"
                     value={cpf}
-                    onChange={(e) => setCpf(e.target.value)}
-                    placeholder="515.178.842-68"
+                    onChange={(e) => {
+                      // Aceita apenas números e formatação visual de CPF
+                      const raw = e.target.value.replace(/\D/g, '').slice(0, 11);
+                      setCpf(raw);
+                    }}
+                    placeholder="51517884268"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 text-sm focus:outline-none focus:border-pink-500 font-mono"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">CPF da conta Sebrae/PNBOX. NÃO é o email do Hub.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">
-                    Senha de Acesso
+                    Senha Sebrae ID
                   </label>
                   <div className="relative">
                     <input
@@ -276,6 +283,7 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
                       {showPassword ? 'Ocultar' : 'Mostrar'}
                     </button>
                   </div>
+                  <p className="text-[10px] text-slate-500 mt-1">Senha da conta Sebrae ID (sebrae.com.br). NÃO é a senha do Hub.</p>
                 </div>
               </div>
 
@@ -288,9 +296,9 @@ export const PnboxConnectionTimeline: React.FC<PnboxConnectionTimelineProps> = (
                   className="mt-0.5 w-4 h-4 rounded border-white/20 bg-slate-950 text-pink-500 focus:ring-pink-500"
                 />
                 <span>
-                  Confirmo que sou o titular da conta PNBOX informada e autorizo o Hub a usar minhas
-                  credenciais exclusivamente para automatizar o preenchimento dos meus planos no
-                  ambiente oficial Sebrae.
+                  Confirmo que sou o titular da conta Sebrae/PNBOX informada e autorizo o Hub a usar
+                  minhas credenciais <strong className="text-pink-400">exclusivamente</strong> para
+                  autenticar e automatizar o preenchimento dos meus planos no ambiente oficial Sebrae.
                 </span>
               </label>
 
