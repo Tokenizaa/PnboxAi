@@ -3,10 +3,6 @@ import { createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { popularEventosIniciaisDescoberta, ID_PLANO_PADRAO } from './src/automation/realRunner.ts';
-import { authenticateToken } from './src/automation/auth.ts';
-import { executeResearch } from './src/research/ResearchEngine.ts';
-import { getPlanos, createPlano, updatePlano, deletePlano, duplicatePlano, archivePlano } from './src/skills/database/index.ts';
-import { preencheFerramenta } from './src/automation/officialRunner.ts';
 import { executarPesquisaUnificada } from './src/automation/aiProviders.ts';
 import { gerarSchema } from './src/utils/schemaGenerator.ts';
 import { validateSchema } from './src/automation/schemaValidator.ts';
@@ -16,6 +12,7 @@ import { getDashboardStats } from './src/skills/dashboard/index.ts';
 import { executePlan } from './src/automation/ddpClient.ts';
 import { getGeminiDeepResearch } from './src/automation/geminiDeepResearch.ts';
 import { getPlaywrightScript } from './src/automation/playwrightScriptGenerator.ts';
+import { authMiddleware } from "./src/server/middleware/authMiddleware";
 import { getRealRunnerStatus } from './src/automation/realRunner.ts';
 
 // Initialize Express app
@@ -1339,9 +1336,9 @@ app.post('/api/automation/fill-batch', authMiddleware, async (req, res) => {
     const { nomePlano, setor, dados14Ferramentas, idPlano } = req.body || {};
     const script = gerarScriptCriarNovoPlanoPlaywright(
       nomePlano || 'Novo Negócio Inteligente',
-      setor: setor || 'Serviços',
+      setor || 'Serviço',
       dados14Ferramentas,
-      idPlano: idPlano || 'plano_' + Math.random().toString(36).substring(2, 8)
+      idPlano || 'plano_' + Math.random().toString(36).substring(2, 8)
     );
 
     res.json({
@@ -1374,15 +1371,14 @@ app.post('/api/automation/fill-batch', authMiddleware, async (req, res) => {
     }
 
     globalAuthState.modoExecucao = modoExecucao;
+    globalAuthState.modoExecucao = modoExecucao;
     res.json({
       status: 'ok',
       modoExecucao,
-      mensagem:
-        modoExecucao === 'LIVE'
-          ? '⚠️ MODO LIVE ATIVADO — preenchimentos serão gravados no servidor real do PNBOX.'
-          : 'Modo DRY_RUN ativado — preenchimentos são simulados.'
-    );
-  });
+      mensagem: modoExecucao === 'LIVE'
+        ? '⚠️ MODO LIVE ATIVADO — preenchimentos serão gravados no servidor real do PNBOX.'
+        : 'Modo DRY_RUN ativado — preenchimentos são simulados.'
+    });
 
   // Vite middleware setup
   if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
@@ -1416,4 +1412,4 @@ app.post('/api/automation/fill-batch', authMiddleware, async (req, res) => {
   }
 
   // Export the Express app for use in Vercel serverless functions
-  export default app;
+  // export default app;
