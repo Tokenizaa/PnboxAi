@@ -1,16 +1,16 @@
 import { Router } from 'express';
-import { ResearchEngine } from '../../src/research/ResearchEngine.ts';
-import { DatabaseSkill } from '../../src/skills/database/index.ts';
-import { prepararEstruturaExecucao, executarLote, BatchExecutionSummary, DdpAuthContext } from '../../src/automation/realRunner.ts';
-import { TEMPLATES_NEGOCIO } from '../../src/automation/businessTemplates.ts';
+import { ResearchEngine } from '../../research/ResearchEngine.ts';
+import { DatabaseSkill } from '../../skills/database/index.ts';
+import { prepararEstruturaExecucao, executarLote, BatchExecutionSummary, DdpAuthContext } from '../../automation/realRunner.ts';
+import { TEMPLATES_NEGOCIO } from '../../automation/businessTemplates.ts';
 import { FERRAMENTAS_PNBOX } from '../../src/automation/schemaCatalog.ts';
-import { obterSessaoUsuario } from '../../src/automation/auth.ts';
+import { obterSessaoUsuario } from '../../automation/auth.ts';
 
 const router = Router();
 const db = new DatabaseSkill();
 
 // 10.1 IA Deep Research V2 - Research Engine Agentic com Evidence Store
-router.post('/ai/deep-research-v2', async (req, res) => {
+router.post('/deep-research-v2', async (req, res) => {
   const {
     prompt,
     cidadeUf,
@@ -61,7 +61,7 @@ router.post('/ai/deep-research-v2', async (req, res) => {
 });
 
 // Contract: synthesize-plan - Integrates with research service to generate canonical business model
-router.post('/ai/synthesize-plan', async (req, res) => {
+router.post('/synthesize-plan', async (req, res) => {
   const {
     prompt,
     cidadeUf,
@@ -79,7 +79,7 @@ router.post('/ai/synthesize-plan', async (req, res) => {
     });
   }
 
-  if (!idPlano || typeof idPlano !== 'string' || idPlano.trim().length === 0) {
+  if (!idPlano || typeof idPlano !== 'string') {
     return res.status(400).json({
       status: 'error',
       mensagem: 'O ID do plano de negócio é obrigatório.'
@@ -121,7 +121,7 @@ router.post('/ai/synthesize-plan', async (req, res) => {
 });
 
 // Contract: fill-batch - Process PNBOX form filling with real data
-router.post('/automation/fill-batch', async (req, res) => {
+router.post('/fill-batch', async (req, res) => {
   const {
     templateId,
     dados,
@@ -189,7 +189,7 @@ router.post('/automation/fill-batch', async (req, res) => {
         mensagem: 'Sessão PNBOX não encontrada. Por favor, conecte-se ao PNBOX primeiro usando o endpoint /api/pnbox/connect'
       });
     }
-    
+
     // Check if session is expired
     if (new Date(sessao.expiraEm).getTime() <= Date.now()) {
       return res.status(401).json({

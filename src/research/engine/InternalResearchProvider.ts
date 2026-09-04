@@ -1,5 +1,7 @@
 import { Source, SourceType, ResearchCategory } from "../types";
 import { getSourceReliability, classifySourceType } from "../policies";
+import { UnifiedAiProvider, AiMessage, AiRequestOptions } from "../../ai/unifiedProvider";
+import { SearchService, SearchResultItem, createSearchService } from "./SearchService";
 
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -22,114 +24,99 @@ export interface ResearchSearchResult {
   groundingMetadata?: any;
 }
 
+/**
+ * Internal research provider that uses:
+ *   - A search service (via createSearchService factory) for source gathering
+ *   - UnifiedAiProvider (with NVIDIA as primary) for reasoning and answer generation
+ * 
+ * This provider does NOT use Gemini for any task. It uses NVIDIA as the primary AI provider
+ * for reasoning, and a separate search service for source gathering.
+ */
 export class InternalResearchProvider {
-  private geminiApiKey: string;
-  private model: string;
+  private searchService: SearchService;
+  private unifiedAiProvider: UnifiedAiProvider;
 
-  constructor() {
-    this.geminiApiKey = process.env.GEMINI_API_KEY || '';
-    this.model = process.env.GEMINI_RESEARCH_MODEL || 'gemini-2.5-flash';
-    
-    if (!this.geminiApiKey) {
-      throw new Error(
-        "GEMINI_API_KEY is required for internal research provider. " +
-        "Configure GEMINI_API_KEY in environment variables."
-      );
-    }
+  constructor(searchService?: SearchService) {
+    // Use injected search service or default to factory-created service (real or stub based on env)
+    this.searchService = searchService ?? createSearchService();
+    this.unifiedAiProvider = UnifiedAiProvider.getInstance();
   }
 
   async search(request: ResearchSearchRequest): Promise<ResearchSearchResult> {
-    const { GoogleGenAI } = await import('@google/genai');
-    
-    const ai = new GoogleGenAI({
-      apiKey: this.geminiApiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-    });
+    try {
+      // Step 1: Gather raw search results using the search service (no LLM involved)
+      const rawResults = await this.searchService.search(request.query, {
+        numResults: 10
+      });
 
-    const systemPrompt = `Você é um pesquisador sênior de inteligência de mercado do Sebrae.
-Sua missão é fornecer dados factuais, realistas e verificáveis sobre o mercado brasileiro.
-Use a ferramenta de busca do Google para encontrar fontes reais e atuais.
-Nunca invente dados fictícios. Indique fontes reais do ecossistema brasileiro (como Sebrae, IBGE, Banco Central, Associações Setoriais, etc.).`;
+      // Step 2: Use UnifiedAiProvider (NVIDIA) to generate an answer based on the search results
+      const answer = await this.generateAnswerFromResults(request, rawResults);
 
-    const userPrompt = `Realize uma pesquisa aprofundada sobre a seguinte questão:
-"${request.query}"
-Setor: ${request.industry || 'Geral'}
-Região: ${request.location || 'Brasil / Nacional'}
-Categoria: ${request.category}
+      // Format sources to match the expected interface
+      const sources = rawResults.map(result => ({
+        url: result.url,
+        title: result.title,
+        snippet: result.snippet
+      }));
 
-Responda em JSON com fatos concretos e fontes de referência:
-{
-  "answer": "Resumo analítico dos dados encontrados...",
-  "facts": [
-    {
-      "claim": "Fato ou estatística confirmada",
-      "evidence": "Trecho ou evidência numérica que sustenta a afirmação",
-      "sourceUrl": "https://url-real-da-fonte.com.br",
-      "sourceTitle": "Nome da Publicação / Instituição",
-      "confidence": 0.9
+      return {
+        answer,
+        sources,
+        groundingMetadata: null // We don't have grounding metadata from this approach
+      };
+    } catch (error) {
+      console.error(`[InternalResearchProvider] Search failed for "${request.query}":`, error);
+      throw new Error(`Internal research provider failed: ${error.message}`);
     }
-  ],
-  "sources": [
-    {
-      "url": "https://sebrae.com.br/...",
-      "title": "Título da publicação",
-      "publisher": "Sebrae Nacional"
-    }
-  ]
-}`;
+  }
 
-    const response = await ai.models.generateContent({
-      model: this.model,
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        tools: [{ googleSearch: {} }],
-        temperature: 0.2,
-        topP: 0.7,
+  /**
+   * Generates an answer using the UnifiedAiProvider (NVIDIA) based on the search results.
+   * This is where NVIDIA is used as the primary AI provider for reasoning.
+   */
+  private async generateAnswerFromResults(
+    request: ResearchSearchRequest,
+    results: SearchResultItem[]
+  ): Promise<string> {
+    // Prepare context from search results
+    const context = results
+      .map((r, index) => `${index + 1}. Title: ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}`)
+      .join("\n\n");
+
+    // Create messages for the AI provider
+    const messages: AiMessage[] = [
+      {
+        role: "system",
+        content: `Você é um pesquisador sênior de inteligência de mercado do Sebrae.
+        Sua missão é fornecer dados factuais, realistas e verificáveis sobre o mercado brasileiro.
+        Use APENAS as informações fornecidas nos resultados da pesquisa abaixo para formular sua resposta.
+        Nunca invente dados fictícios. Se as informações forem insuficientes, indique claramente isso.
+        Fonte das informações: resultados de pesquisa web (não especifique o mecanismo de busca).`
+      },
+      {
+        role: "user",
+        content: `Realize uma pesquisa aprofundada sobre a seguinte questão:
+        "${request.query}"
+        Setor: ${request.industry || 'Geral'}
+        Região: ${request.location || 'Brasil / Nacional'}
+        Categoria: ${request.category}
+
+        Resultados da pesquisa:
+        ${context}
+
+        Responda em Portuguese com um resumo analítico dos dados encontrados, basado exclusivamente nos resultados fornecidos.
+        Se houver informações conflitantes, destaque-as. Se os dados forem insuficientes para responder completamente, indique isso claramente.`
       }
-    });
+    ];
 
-    const answer = response.text || '';
-    const sources: Array<{ url: string; title: string; snippet?: string }> = [];
-
-    const groundingChunks = (response as any).candidates?.[0]?.groundingMetadata?.groundingChunks;
-    if (Array.isArray(groundingChunks)) {
-      for (const chunk of groundingChunks) {
-        if (chunk.web?.uri && chunk.web?.title) {
-          sources.push({
-            url: chunk.web.uri,
-            title: chunk.web.title,
-          });
-        }
-      }
-    }
-
-    const groundingSupports = (response as any).candidates?.[0]?.groundingMetadata?.groundingSupports;
-    const snippets: Record<string, string> = {};
-    if (Array.isArray(groundingSupports)) {
-      for (const support of groundingSupports) {
-        const segment = support.segment?.text || '';
-        const chunkIndices = support.groundingChunkIndices || [];
-        for (const idx of chunkIndices) {
-          if (groundingChunks[idx]?.web?.uri) {
-            const uri = groundingChunks[idx].web.uri;
-            if (!snippets[uri]) {
-              snippets[uri] = segment.substring(0, 500);
-            }
-          }
-        }
-      }
-    }
-
-    for (const source of sources) {
-      source.snippet = snippets[source.url] || '';
-    }
-
-    return {
-      answer,
-      sources,
-      groundingMetadata: (response as any).candidates?.[0]?.groundingMetadata,
+    // Call UnifiedAiProvider with NVIDIA as primary (no silent fallback)
+    const options: AiRequestOptions = {
+      provider: 'nvidia', // Explicitly request NVIDIA as primary
+      temperature: 0.2,
+      maxTokens: 1024
     };
+
+    return await this.unifiedAiProvider.chat(messages, options);
   }
 
   async searchMultiple(requests: ResearchSearchRequest[]): Promise<ResearchSearchResult[]> {
@@ -144,18 +131,31 @@ Responda em JSON com fatos concretos e fontes de referência:
         results.push({
           answer: '',
           sources: [],
-          groundingMetadata: null,
+          groundingMetadata: null
         });
       }
     }
-
+    
     return results;
   }
 
-  getConfig(): { model: string; hasApiKey: boolean } {
+  getConfig(): { 
+    searchService: string; 
+    hasNvidiaConfigured: boolean; 
+  } {
+    // Determine if we are using real or stub service
+    let serviceType = 'unknown';
+    if (this.searchService.constructor.name === 'GoogleCustomSearchService') {
+      serviceType = 'real';
+    } else if (this.searchService.constructor.name === 'StubSearchService') {
+      serviceType = 'stub';
+    } else {
+      serviceType = this.searchService.constructor.name;
+    }
+
     return {
-      model: this.model,
-      hasApiKey: !!this.geminiApiKey,
+      searchService: serviceType,
+      hasNvidiaConfigured: !!this.unifiedAiProvider.getDiagnostics().isNvidiaConfigured
     };
   }
 }

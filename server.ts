@@ -1,11 +1,7 @@
 import express from 'express';
-import { createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { authMiddleware } from "./src/server/middleware/authMiddleware";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Initialize Express app
 const app = express();
@@ -41,7 +37,7 @@ app.get('/api/health', (req, res) => {
 if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
   (async () => {
     try {
-      const vite = await createViteServer({
+      const vite = await (await import('vite')).createViteServer({
         server: { middlewareMode: true },
         appType: 'spa'
       });
