@@ -3,11 +3,107 @@ import { ResearchEngine } from '../../research/ResearchEngine.ts';
 import { DatabaseSkill } from '../../skills/database/index.ts';
 import { prepararEstruturaExecucao, executarLote, BatchExecutionSummary, DdpAuthContext } from '../../automation/realRunner.ts';
 import { TEMPLATES_NEGOCIO } from '../../automation/businessTemplates.ts';
-import { FERRAMENTAS_PNBOX } from '../../src/automation/schemaCatalog.ts';
-import { obterSessaoUsuario } from '../../automation/auth.ts';
+import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from '../../automation/schemaCatalog.ts';
+import { obterSessaoUsuario, obterStatusSessaoUsuario, simularExpiracaoSessao, iniciarSessaoPlaywright, globalAuthState } from '../../automation/auth.ts';
+import { obterEventosTrafego, limparEventosTrafego } from '../../automation/trafficMonitor.ts';
+import { extrairIdPlano } from '../../utils/planUtils.ts';
+import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
 const db = new DatabaseSkill();
+
+// Catalog público de ferramentas PNBOX
+router.get('/catalog', (req, res) => {
+  res.json({
+    status: 'ok',
+    idPlanoPadrao: ID_PLANO_PADRAO,
+    totalFerramentas: FERRAMENTAS_PNBOX.length,
+    ferramentas: FERRAMENTAS_PNBOX
+  });
+});
+
+// Templates de modelos de negócio prontos
+router.get('/templates', (req, res) => {
+  res.json({ status: 'ok', templates: TEMPLATES_NEGOCIO });
+});
+
+// Status da sessão PNBOX do usuário autenticado
+router.get('/auth/status', authMiddleware, (req, res) => {
+  const userId = (req as any).user.id;
+  const session = obterStatusSessaoUsuario(userId);
+  res.json({
+    status: 'ok',
+    isOnline: true,
+    isExpired: session.isExpired || false,
+    session
+  });
+});
+
+// Marca sessão como expirada (teste de reconexão)
+router.post('/auth/expire', authMiddleware, (req, res) => {
+  const result = simularExpiracaoSessao();
+  res.json({
+    status: 'ok',
+    mensagem: 'Sessão marcada como expirada para fins de teste de reconexão.',
+    session: result
+  });
+});
+
+// Login oficial PNBOX (Sebrae ID) — SEMPRE LIVE
+router.post('/auth/login', authMiddleware, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { cpf, password, idPlano, consentimentoAceito } = req.body || {};
+
+  if (!cpf || !password) {
+    return res.status(400).json({
+      status: 'error',
+      mensagem: 'CPF e senha são obrigatórios.'
+    });
+  }
+  if (!consentimentoAceito) {
+    return res.status(400).json({
+      status: 'error',
+      mensagem: 'É necessário aceitar o consentimento de uso das credenciais.'
+    });
+  }
+
+  const modo: 'DRY_RUN' | 'LIVE' = 'LIVE';
+  globalAuthState.modoExecucao = modo;
+
+  const idPlanoNormalizado = extrairIdPlano(idPlano || '') || ID_PLANO_PADRAO;
+  const credenciais = {
+    cpf: String(cpf).trim(),
+    password: String(password),
+    idPlano: idPlanoNormalizado
+  };
+
+  const sessionResult = await iniciarSessaoPlaywright(credenciais, consentimentoAceito, modo, userId);
+  const isAuth = sessionResult.status === 'authenticated';
+  res.json({
+    status: isAuth ? 'ok' : 'error',
+    session: sessionResult,
+    mensagem: isAuth
+      ? 'Sessão oficial LIVE conectada com sucesso no PNBOX.'
+      : (sessionResult.ultimoLog || 'Falha ao autenticar sessão com o Sebrae ID.')
+  });
+});
+
+// Monitor de tráfego de rede (XHR/Fetch/DDP)
+router.get('/traffic', (req, res) => {
+  const { tipo, apenasSalvamento, ferramentaId } = req.query;
+  const eventos = obterEventosTrafego({
+    tipo: tipo ? String(tipo) : undefined,
+    apenasSalvamento: apenasSalvamento === 'true',
+    ferramentaId: ferramentaId ? String(ferramentaId) : undefined
+  });
+  res.json({ status: 'ok', total: eventos.length, eventos });
+});
+
+// Limpeza do histórico de tráfego
+router.post('/traffic/clear', (req, res) => {
+  limparEventosTrafego();
+  res.json({ status: 'ok', mensagem: 'Histórico de tráfego limpo com sucesso.' });
+});
 
 // 10.1 IA Deep Research V2 - Research Engine Agentic com Evidence Store
 router.post('/deep-research-v2', async (req, res) => {

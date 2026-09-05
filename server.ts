@@ -1,8 +1,8 @@
-import dotenv from "dotenv";
-dotenv.config({ override: true });
+// Primeiro import: garante .env carregado antes de módulos que leem process.env em module scope
+import './src/server/dotenv-init';
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { createServer } from "vite";
 import { authMiddleware } from "./src/server/middleware/authMiddleware";
 
 // Initialize Express app
@@ -35,36 +35,67 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Vite middleware setup (only in development)
-if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
-  (async () => {
+// Start server
+async function startServer() {
+  console.log("[DEBUG] Starting server...");
+  console.log("[DEBUG] NODE_ENV:", process.env.NODE_ENV);
+  console.log("[DEBUG] VERCEL:", process.env.VERCEL);
+  // Initialize Vite if in development
+  if (process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
     try {
-      const vite = await (await import('vite')).createViteServer({
+      console.log("[DEBUG] Creating Vite server...");
+      const vite = await createServer({
         server: { middlewareMode: true },
         appType: 'spa'
       });
       app.use(vite.middlewares);
+      console.log("[DEBUG] Vite server created and middleware added");
+      console.log("[DEBUG] Vite middleware added");
     } catch (error) {
       console.error('Failed to initialize Vite middleware:', error);
+      process.exit(1);
     }
-  })();
-} else {
-  const distPath = path.join(process.cwd(), 'dist');
-  console.log('[DEBUG] Serving static from:', distPath);
-  app.use(express.static(distPath, { index: false }));
-  app.get('*', (req, res) => {
-    console.log('[DEBUG] Fallback for:', req.path);
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-}
+  } else {
+    // Production: serve static files
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath, { index: false }));
+    console.log("[DEBUG] Static files middleware added");
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
 
-// Start server only if not running in Vercel (serverless environment)
-if (process.env.VERCEL !== '1') {
+  // Start server
   const PORT = Number(process.env.PORT) || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, "0.0.0.0", (err) => {
+    if (err) {
+      console.error("[DEBUG] Listen error:", err);
+      process.exit(1);
+    }
     console.log(`[PNBOX Hub] Server running at http://0.0.0.0:${PORT}`);
+    console.log(`[PNBOX Hub] Server running at http://0.0.0.0:${PORT}`);
+    console.log("[DEBUG] Server listening on port", PORT);
   });
 }
 
-// Export the Express app for use in Vercel serverless functions
-export default app;
+// Start server
+async function run() {
+  try {
+    // Register routes
+    registerAuthRoutes(app);
+    registerPNBoxCredentialsRoutes(app);
+    registerPNBoxConnectionRoutes(app);
+    registerPlansRoutes(app);
+    registerResearchRoutes(app);
+    registerAutomationRoutes(app);
+    registerSystemRoutes(app);
+
+    // Start the server
+    await startServer();
+  } catch (error) {
+    console.error('Server startup failed:', error);
+    process.exit(1);
+  }
+}
+
+run();

@@ -86,7 +86,10 @@ export function usePnboxSession(options: UsePnboxSessionOptions = {}) {
       if (localCreds && localCreds.cpf && localCreds.password) {
         const loginRes = await fetch('/api/automation/auth/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(platSession?.accessToken ? { Authorization: `Bearer ${platSession.accessToken}` } : {})
+          },
           body: JSON.stringify({
             cpf: localCreds.cpf,
             password: localCreds.password,
