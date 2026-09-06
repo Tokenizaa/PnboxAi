@@ -1,51 +1,65 @@
 # Execução da Auditoria Forense — PnboxAi
 
-**Data:** 2026-09-05  
-**Branch auditada:** `main`  
-**HEAD:** `3768f68753141fb66738b68796d41236b1f34900`
+**Data:** 2026-09-05
+**Branch:** `main`
 
-## Objetivo
+## Estado atual
 
-Determinar, a partir do estado efetivamente versionado no GitHub, qual implementação PNBOX realmente existe no `HEAD`, sem confiar em auditorias ou afirmações anteriores.
+A auditoria encontrou múltiplas implementações históricas/concorrentes de planos e iniciou a consolidação para que o PNBOX seja a única fonte de verdade.
 
-## Evidências iniciais
+## Evidências encontradas
 
-### 1. Estado atual do Git
+### PNBOX/DDP real
 
-O `main` aponta para `3768f68753141fb66738b68796d41236b1f34900`, cujo commit tem a mensagem `feat: implement PNBOX plan synchronization` e é filho de `134ea9585abb49d1dd24e662e706320166476952`.
+- `realRunner.ts` possui cliente DDP real contra `wss://pnbox.sebrae.com.br/websocket`.
+- A autenticação DDP usa `login` com `resume` a partir do token Meteor real.
+- Existem rotas `/api/pnbox/plans`, `/api/pnbox/plans/:id/pull-all`, `/push-all` e operações por ferramenta.
+- `oidcPnboxPlaywright.ts` implementa o fluxo real de OIDC/PNBOX e extrai `Meteor.userId`/token/cookies.
 
-### 2. Algoritmo alegado não encontrado
+### Gaps descobertos
 
-A busca global por `conciliarPlanosBidirecional` no repositório atual não retornou resultados.
+1. `PlansContext` consumia `/api/plans`, enquanto outros componentes consumiam `/api/pnbox/plans`.
+2. `plansStore.ts` continha `USER_PLANS` como fonte de planos e um plano hardcoded (`PLANOS_CRIADOS`).
+3. `planUtils.ts` continha `PLANOS_EXEMPLO_INICIAIS` e persistência em `localStorage`, incluindo IDs fictícios.
+4. `App.tsx` inicializava/selecionava um plano padrão fictício quando não havia plano remoto.
+5. `AiPlanCreatorStudio.tsx` chamava os caminhos antigos `/api/automation/planos/list` e `/api/automation/planos/create`.
+6. `realRunner.ts` possuía fallback para `cachedPlanos` quando o DDP não retornava dados.
+7. `criarPlanoPnboxDdp()` possui fallback interno para um ID `plano_<timestamp>` quando nenhum método Meteor confirma criação; isso ainda precisa ser removido no próximo ciclo para que a função nunca reporte criação não confirmada.
+8. `DdpClient` coleta `added/changed/removed` durante `subscribeAndCollect`, mas ainda não existe um consumidor persistente de eventos para manter uma assinatura realtime contínua do plano após o snapshot.
+9. `officialRunner.ts` continua existindo e é importado por componentes/rotas para DRY_RUN; isso é aceitável somente se o modo estiver explicitamente separado do LIVE e nunca puder ser apresentado como execução real.
 
-**Conclusão:** não há evidência, no código pesquisável do `HEAD`, de que exista uma função com esse identificador. Portanto não se pode afirmar que esse algoritmo específico esteja implementado.
+## Alterações já aplicadas no GitHub
 
-### 3. Persistência PNBOX
+- Removido o plano hardcoded de `plansStore.ts`; o store passou a ser somente cache transitório de metadados.
+- `planUtils.ts` deixou de ler/escrever `localStorage` para planos e deixou de fornecer planos de exemplo/fallback. `extrairIdPlano()` não inventa mais ID quando a entrada está vazia.
+- `/api/plans` passou a consultar o PNBOX e sincronizar somente o cache transitório.
+- `/api/plans` POST passou a criar via DDP real e rejeita criação sem ID confirmado pelo PNBOX.
+- Operações locais de PATCH/DELETE/archive foram bloqueadas explicitamente até que os métodos Meteor oficiais correspondentes sejam confirmados, evitando falso sucesso.
+- Duplicação usa criação real no PNBOX e exige ID confirmado.
+- Os caminhos legados `/api/automation/planos/list` e `/api/automation/planos/create` agora são aliases do mesmo gateway PNBOX, eliminando uma segunda implementação local.
 
-A migration `supabase/migrations/009_pnbox_credentials.sql` define `pnbox_credentials.user_id` como `uuid NOT NULL UNIQUE REFERENCES auth.users(id)`.
+## Estado ainda BLOCKED
 
-Isso precisa ser comparado com todas as queries TypeScript e com o schema efetivamente implantado no Supabase. Uma query usando `userId` seria incompatível com essa migration.
+Ainda não é permitido declarar sincronização bidirecional/realtime completa.
 
-### 4. Auditorias contraditórias
+### Próximos gaps técnicos
 
-`docs/audit/AUDITORIA-INTEGRACAO-PNBOX-BIDIRECIONAL.md` contém explicitamente a conclusão anterior de que a listagem de projetos era `FAKE / LOCAL`, sem consulta ao PNBOX, enquanto a documentação também descreve a autenticação como real.
+1. Remover o fallback `plano_<timestamp>` de `criarPlanoPnboxDdp()` e exigir resposta Meteor confirmada.
+2. Remover o fallback de `cachedPlanos` dentro de `listarPlanosPnbox()`; cache nunca pode substituir resposta PNBOX.
+3. Eliminar o fallback visual hardcoded restante em `App.tsx`.
+4. Migrar `PlanSwitcherModal` de `localStorage` para os dados remotos da sessão/API.
+5. Auditar e eliminar qualquer rota `server.ts` antiga que simule DDP ou gere `doc_*` localmente e ainda esteja acessível.
+6. Confirmar os métodos Meteor reais de update/delete/archive antes de implementá-los.
+7. Implementar assinatura DDP persistente para `added/changed/removed` e propagá-la ao frontend, se o protocolo do PNBOX permitir essa assinatura para os planos.
+8. Validar Supabase `pnbox_credentials` contra o schema implantado e eliminar qualquer divergência `userId`/`user_id`.
+9. Executar build, testes unitários e E2E LIVE em um executor real. A conexão GitHub usada nesta sessão não possui shell para executar npm/Playwright; portanto esses testes não foram falsamente marcados como PASS.
 
-Isso demonstra que o repositório já contém estados/documentações contraditórios e que documentação não pode ser usada como prova de implementação.
+## VEREDITO
 
-### 5. Runtime LIVE/DRY_RUN
+**IMPLEMENTAÇÃO INCONSISTENTE — BLOCKED.**
 
-A árvore anterior contém múltiplos locais de estado de execução, incluindo `App.tsx`, `ExecutionContext`, `auth.ts`, componentes PNBOX e estado global do backend. A existência desses locais exige verificar a cadeia real de propagação e reidratação antes de considerar LIVE comprovado.
+A consolidação já eliminou parte importante das fontes locais de divergência, mas a cadeia completa ainda não está provada:
 
-## Limitação da execução
+`PNBOX REAL → AUTH REAL → METEOR REAL → DDP REAL → PROJECT REAL → TOOL DATA REAL → SUPABASE REAL → RECONCILIATION REAL → FRONTEND REAL → RELOAD → REALTIME`
 
-Esta auditoria foi executada por inspeção direta da árvore e buscas do GitHub. A conexão disponível não fornece um executor arbitrário de shell para rodar `npm`, Playwright ou o servidor da aplicação dentro deste ambiente. Portanto **nenhum teste E2E LIVE é declarado como executado**.
-
-## Estado provisório
-
-**VEREDITO: IMPLEMENTAÇÃO NÃO COMPROVADA / BLOCKED**
-
-Motivo: o código versionado contém infraestrutura de integração real, mas as evidências atuais não provam a cadeia completa `PNBOX REAL → AUTH REAL → METEOR REAL → DDP REAL → PROJECT REAL → TOOL DATA REAL → SUPABASE REAL → RECONCILIATION REAL → FRONTEND REAL → RELOAD`.
-
-## Próxima etapa obrigatória
-
-Auditar os arquivos efetivamente importados pelo entrypoint do servidor/frontend, todas as rotas `/api/pnbox/*`, todos os módulos de sessão e sincronização, todos os usos de `pnbox_credentials`, todos os adaptadores de planos e todos os mecanismos DDP/Meteor. Cada conclusão deverá distinguir **existe**, **é importado**, **é chamado**, **consulta PNBOX real**, **persiste**, **retorna ao frontend** e **foi testado**.
+Somente após todos esses elos serem comprovados será permitido declarar a integração concluída.
