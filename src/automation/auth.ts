@@ -1,53 +1,13 @@
-import fs from 'fs';
-import path from 'path';
 import { AuthSessionState } from '../types/pnbox';
 import { pnboxOidcLoginViaPlaywright } from './oidcPnboxPlaywright';
-import { getEncryptedPnboxCredentials } from '../utils/secureStorage';
 import { PnboxConnectionStep } from './connectionJob';
 
-/**
- * Estado de autenticação PNBOX.
- *
- * IMPORTANTE: Por padrão, este módulo NÃO armazena credenciais em disco ou em variáveis globais
- * de longa duração por motivos de segurança. As credenciais do usuário são passadas a cada chamada
- * `iniciarSessaoPlaywright(cpf, password)` e descartadas após o handshake.
- *
- * Entretanto, para conveniência, o usuário pode optar por salvar credenciais criptografadas
- * localmente via UI de Configurações. Neste caso, as credenciais podem ser reutilizadas
- * automaticamente quando não forem fornecidas explicitamente.
- *
- * As credenciais históricas foram removidas para impedir uso não-autorizado.
- * Agora o usuário pode escolher entre fornecer credenciais na UI ou usar as salvas.
- */
+/** Autenticação PNBOX exclusivamente LIVE. Não há sessão, credencial ou estado PNBOX sintético. */
+export interface Credentials { cpf: string; password: string; idPlano: string; }
 
-export interface Credentials {
-  cpf: string;
-  password: string;
-  idPlano: string;
-}
-
-/**
- * CREDENCIAIS_PADRAO_DEPRECATED — stub vazio para compatibilidade.
- * O playwrightScriptGenerator.ts usa isso só para preencher a string de código
- * gerado para o usuário rodar LOCALMENTE. Não é usado para autenticar o Hub.
- *
- * Use sempre a UI para inserir credenciais.
- */
-export const CREDENCIAIS_PADRAO = {
-  cpf: '',
-  password: '',
-  idPlano: ''
-};
-
-/**
- * @deprecated Não use — credenciais devem vir SEMPRE da UI.
- */
+export const CREDENCIAIS_PADRAO = { cpf: '', password: '', idPlano: '' };
 export const CREDENCIAIS_PADRAO_DEPRECATED = CREDENCIAIS_PADRAO;
 
-/**
- * Sessão ativa — apenas runtime, nunca persistida em disco.
- * Substitui credenciais por tokens OIDC + cookies após autenticação.
- */
 export interface SessaoPnbox {
   cookiesPnbox: string;
   idToken: string;
@@ -59,212 +19,87 @@ export interface SessaoPnbox {
   idPlano: string;
   autenticadoEm: string;
   expiraEm: string;
-  modoExecucao?: 'DRY_RUN' | 'LIVE';
+  modoExecucao?: 'LIVE';
   planosPnbox?: any[];
 }
 
-// Tempo de vida da sessão em minutos (TTL do token OIDC + margem)
 export const TEMPO_VIDA_SESSAO_MINUTOS = 50;
-
-/**
- * Cache de sessões PNBOX por usuário.
- * Chave: userId (string)
- * Mantido em memória e sincronizado em disco (.data/pnbox_sessions.json)
- * para resistir a reloads de página e reinicializações do processo.
- */
 const userSessions = new Map<string, SessaoPnbox>();
-const SESSIONS_CACHE_FILE = path.join(process.cwd(), '.data', 'pnbox_sessions.json');
 
-function salvarSessoesEmDisco(): void {
-  try {
-    const dir = path.dirname(SESSIONS_CACHE_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const obj: Record<string, SessaoPnbox> = {};
-    for (const [uid, sess] of userSessions.entries()) {
-      if (new Date(sess.expiraEm).getTime() > Date.now()) {
-        obj[uid] = sess;
-      }
-    }
-    fs.writeFileSync(SESSIONS_CACHE_FILE, JSON.stringify(obj, null, 2), 'utf8');
-  } catch (err) {
-    console.warn('[PNBOX Auth] Falha ao salvar sessões em disco:', err);
-  }
-}
-
-function carregarSessoesDoDisco(): void {
-  try {
-    if (!fs.existsSync(SESSIONS_CACHE_FILE)) return;
-    const raw = fs.readFileSync(SESSIONS_CACHE_FILE, 'utf8');
-    const obj = JSON.parse(raw);
-    const now = Date.now();
-    for (const [uid, sess] of Object.entries(obj)) {
-      const s = sess as SessaoPnbox;
-      if (s.expiraEm && new Date(s.expiraEm).getTime() > now) {
-        userSessions.set(uid, s);
-      }
-    }
-    if (userSessions.size > 0) {
-      console.log(`[PNBOX Auth] ${userSessions.size} sessão(ões) ativa(s) restaurada(s) do disco.`);
-    }
-  } catch (err) {
-    console.warn('[PNBOX Auth] Falha ao carregar sessões do disco:', err);
-  }
-}
-
-// Inicializa restaurando sessões válidas
-carregarSessoesDoDisco();
-
-/**
- * Obtém a sessão PNBOX de um usuário específico.
- */
 export function obterSessaoUsuario(userId: string): SessaoPnbox | null {
-  let sessao = userSessions.get(userId);
-  if (!sessao) {
-    carregarSessoesDoDisco();
-    sessao = userSessions.get(userId);
-  }
+  const sessao = userSessions.get(userId);
   if (!sessao) return null;
   if (new Date(sessao.expiraEm).getTime() <= Date.now()) {
     userSessions.delete(userId);
-    salvarSessoesEmDisco();
     return null;
   }
   return sessao;
 }
 
-/**
- * Define/atualiza a sessão PNBOX de um usuário.
- */
 export function definirSessaoUsuario(userId: string, sessao: SessaoPnbox): void {
+  if (sessao.modoExecucao !== 'LIVE') throw new Error('Somente sessões LIVE do PNBOX podem ser registradas.');
   userSessions.set(userId, sessao);
-  salvarSessoesEmDisco();
 }
 
-/**
- * Remove a sessão PNBOX de um usuário (logout/expiração).
- */
-export function removerSessaoUsuario(userId: string): void {
-  userSessions.delete(userId);
-  salvarSessoesEmDisco();
-}
+export function removerSessaoUsuario(userId: string): void { userSessions.delete(userId); }
 
-/**
- * Obtém cookies PNBOX de um usuário específico.
- */
 export function obterCookiesPnboxUsuario(userId: string): string | null {
-  const s = obterSessaoUsuario(userId);
-  return s?.cookiesPnbox || null;
+  return obterSessaoUsuario(userId)?.cookiesPnbox || null;
 }
 
-/**
- * Estado exposto para a UI (AuthSessionState) - mantido para compatibilidade
- * mas agora deriva de sessão específica do usuário.
- * NOTA: Para uso em servidor multi-usuário, passe userId explicitamente.
- */
 export const globalAuthState: AuthSessionState = {
-  status: 'idle',
-  cpf: '',
-  idPlano: '',
-  modoExecucao: 'DRY_RUN',
-  logs: [
-    {
-      timestamp: new Date().toISOString(),
-      mensagem:
-        'Módulo de autenticação pronto. Forneça CPF + senha na aba "Sessão Playwright" para conectar ao PNBOX.',
-      level: 'info'
-    }
-  ]
+  status: 'idle', cpf: '', idPlano: '', modoExecucao: 'DRY_RUN', logs: [{
+    timestamp: new Date().toISOString(),
+    mensagem: 'Autenticação PNBOX pronta. Somente conexão LIVE oficial é permitida.',
+    level: 'info'
+  }]
 };
 
 export function addAuthLog(mensagem: string, level: 'info' | 'warn' | 'error' | 'success' = 'info') {
-  const entry = { timestamp: new Date().toISOString(), mensagem, level };
-  globalAuthState.logs.unshift(entry);
+  globalAuthState.logs.unshift({ timestamp: new Date().toISOString(), mensagem, level });
   if (globalAuthState.logs.length > 100) globalAuthState.logs.pop();
   globalAuthState.ultimoLog = mensagem;
-  // NÃO logar credenciais
-  if (!level || level === 'info' || level === 'success' || level === 'warn' || level === 'error') {
-    console.log(`[PNBOX Auth] [${level.toUpperCase()}] ${mensagem}`);
-  }
+  console.log(`[PNBOX Auth] [${level.toUpperCase()}] ${mensagem}`);
 }
 
-/**
- * Obtém status de sessão para um usuário específico.
- * Substitui obterStatusSessaoAtualizada() para uso multi-usuário.
- */
 export function obterStatusSessaoUsuario(userId: string): AuthSessionState {
   const sessao = obterSessaoUsuario(userId);
-
   const state: AuthSessionState = {
-    status: 'idle',
-    cpf: '',
-    idPlano: '',
-    modoExecucao: 'DRY_RUN',
-    logs: [...globalAuthState.logs],
-    isExpired: false,
-    tempoRestanteMinutos: 0,
-    isOnline: false,
+    status: 'idle', cpf: '', idPlano: '', modoExecucao: 'DRY_RUN', logs: [...globalAuthState.logs],
+    isExpired: false, tempoRestanteMinutos: 0, isOnline: false
   };
-
-  if (!sessao) {
-    return state;
-  }
-
-  const agora = Date.now();
+  if (!sessao) return state;
   const expiraEmMs = new Date(sessao.expiraEm).getTime();
-  const restanteMs = expiraEmMs - agora;
-  const restanteMin = Math.max(0, Math.floor(restanteMs / 60000));
-
-  const hasValidTokens = !!sessao.idToken && sessao.idToken.length >= 20 && !!sessao.cookiesPnbox;
-  const isValid = restanteMin > 0 && hasValidTokens;
-
+  const restanteMin = Math.max(0, Math.floor((expiraEmMs - Date.now()) / 60000));
+  const isValid = restanteMin > 0 && !!sessao.idToken && sessao.idToken.length >= 20 && !!sessao.cookiesPnbox;
   state.status = isValid ? 'authenticated' : 'expired';
   state.isExpired = !isValid;
   state.tempoRestanteMinutos = restanteMin;
   state.cpf = sessao.cpf;
   state.idPlano = sessao.idPlano;
-  state.meteorLoginToken = sessao.idToken.length > 24
-    ? sessao.idToken.substring(0, 24) + '...'
-    : sessao.idToken;
+  state.meteorLoginToken = sessao.idToken.length > 24 ? `${sessao.idToken.substring(0, 24)}...` : sessao.idToken;
   state.meteorUserId = sessao.meteorUserId;
   state.autenticadoEm = sessao.autenticadoEm;
   state.expiresAt = sessao.expiraEm;
-  state.cookiesCount = sessao.cookiesPnbox
-    ? sessao.cookiesPnbox.split(';').length
-    : 0;
+  state.cookiesCount = sessao.cookiesPnbox.split(';').length;
   state.isOnline = isValid;
-  state.modoExecucao = isValid ? (sessao.modoExecucao || 'LIVE') : 'DRY_RUN';
+  state.modoExecucao = isValid ? 'LIVE' : 'DRY_RUN';
   state.ultimoPing = new Date().toISOString();
   state.planosPnbox = sessao.planosPnbox || [];
-
   return state;
 }
 
-/**
- * Atualiza os planos em cache na sessão do usuário.
- */
 export function atualizarPlanosSessao(userId: string, planos: any[]): void {
   const sessao = obterSessaoUsuario(userId);
-  if (sessao) {
-    sessao.planosPnbox = planos;
-    definirSessaoUsuario(userId, sessao);
-  }
+  if (sessao) { sessao.planosPnbox = planos; userSessions.set(userId, sessao); }
 }
 
-/**
- * @deprecated Use obterStatusSessaoUsuario(userId) para multi-usuário.
- * Mantido para compatibilidade com código legado que usa estado global.
- */
 export function obterStatusSessaoAtualizada(): AuthSessionState {
-  // Para compatibilidade: retorna estado do primeiro usuário ou idle
   const firstUserId = userSessions.keys().next().value;
-  if (firstUserId) {
-    return obterStatusSessaoUsuario(firstUserId);
-  }
-  return globalAuthState;
+  return firstUserId ? obterStatusSessaoUsuario(firstUserId) : globalAuthState;
 }
 
 export function simularExpiracaoSessao(): AuthSessionState {
-  // Para compatibilidade: limpa todas as sessões (apenas para testes)
   userSessions.clear();
   globalAuthState.status = 'expired';
   globalAuthState.isExpired = true;
@@ -272,143 +107,64 @@ export function simularExpiracaoSessao(): AuthSessionState {
   globalAuthState.meteorLoginToken = undefined;
   globalAuthState.meteorUserId = undefined;
   globalAuthState.isOnline = false;
-  addAuthLog(
-    'Todas as sessões encerradas — necessário novo login.',
-    'warn'
-  );
+  addAuthLog('Todas as sessões encerradas — necessário novo login.', 'warn');
   return globalAuthState;
 }
 
 /**
- * Autentica o usuário no PNBOX via fluxo OIDC (Keycloak AMEI no modo LIVE, ou simulação segura em DRY_RUN).
- *
- * @param credentials CPF + senha fornecidos pelo próprio usuário na UI
- * @param consentimentoAceito TRUE se o usuário marcou o checkbox de consentimento
- * @param modoExecucao 'DRY_RUN' ou 'LIVE'
- * @param userId ID do usuário da plataforma (opcional - para isolamento multi-usuário)
+ * Autentica exclusivamente via OIDC/Playwright real do Sebrae ID.
+ * DRY_RUN foi removido para impedir que uma sessão sintética alcance o executor DDP.
  */
 export async function iniciarSessaoPlaywright(
   credentials: Credentials | null = null,
-  consentimentoAceito: boolean = false,
-  modoExecucao: 'DRY_RUN' | 'LIVE' = 'DRY_RUN',
+  consentimentoAceito = false,
+  modoExecucao: 'DRY_RUN' | 'LIVE' = 'LIVE',
   userId?: string,
   onProgress?: (step: PnboxConnectionStep) => void
 ): Promise<AuthSessionState> {
   if (!consentimentoAceito) {
     globalAuthState.status = 'failed';
-    addAuthLog(
-      'Login bloqueado — usuário não marcou o consentimento de uso das credenciais.',
-      'error'
-    );
+    addAuthLog('Login bloqueado — usuário não marcou o consentimento de uso das credenciais.', 'error');
     return globalAuthState;
   }
-
-  // If no credentials provided, try to load from secure storage (client-side fallback)
-  if (!credentials) {
-    const storedCredentials = await getEncryptedPnboxCredentials();
-    if (storedCredentials && storedCredentials.cpf && storedCredentials.password) {
-      credentials = {
-        cpf: storedCredentials.cpf,
-        password: storedCredentials.password,
-        idPlano: storedCredentials.idPlano || ''
-      };
-      addAuthLog('Usando credenciais salvas do armazenamento seguro', 'info');
-    } else {
-      globalAuthState.status = 'failed';
-      addAuthLog(
-        'Nenhuma credencial fornecida e nenhuma encontrada no armazenamento seguro',
-        'error'
-      );
-      return globalAuthState;
-    }
+  if (modoExecucao !== 'LIVE') {
+    globalAuthState.status = 'failed';
+    globalAuthState.isOnline = false;
+    addAuthLog('DRY_RUN desativado: a integração PNBOX exige autenticação LIVE real.', 'error');
+    return userId ? obterStatusSessaoUsuario(userId) : globalAuthState;
+  }
+  if (!credentials?.cpf || !credentials.password || !credentials.idPlano?.trim()) {
+    globalAuthState.status = 'failed';
+    globalAuthState.isOnline = false;
+    addAuthLog('CPF, senha e ID de plano PNBOX real são obrigatórios.', 'error');
+    return userId ? obterStatusSessaoUsuario(userId) : globalAuthState;
   }
 
   globalAuthState.status = 'authenticating';
   globalAuthState.cpf = credentials.cpf;
   globalAuthState.idPlano = credentials.idPlano;
-  globalAuthState.modoExecucao = modoExecucao;
-
-  const cpfMascarado = credentials.cpf
-    ? credentials.cpf.substring(0, 3) + '.***.***-' + credentials.cpf.slice(-2)
-    : '(vazio)';
-
-  // MODO DRY_RUN: Simulação segura do ambiente Sebrae PNBOX sem necessidade de conexão remota ao vivo
-  if (modoExecucao === 'DRY_RUN') {
-    addAuthLog(`[DRY_RUN] Inicializando sessão de simulação segura para CPF ${cpfMascarado}...`, 'info');
-    const agora = Date.now();
-    const expiraEmMs = agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000;
-    const cpfDigits = credentials.cpf.replace(/\D/g, '') || '515178';
-    const mockToken = 'sim_dryrun_' + Buffer.from(`${credentials.cpf}:${agora}`).toString('base64').substring(0, 24);
-    const mockUserId = `usr_sebrae_${cpfDigits.slice(0, 6)}`;
-
-    const sessao: SessaoPnbox = {
-      cookiesPnbox: `meteor_login_token=${mockToken}; x_mtok=${mockToken}; meteor_user_id=${mockUserId}`,
-      idToken: mockToken,
-      accessToken: mockToken,
-      refreshToken: undefined,
-      meteorSessionId: 'ddp_dryrun_' + Math.random().toString(36).substring(2, 9),
-      meteorUserId: mockUserId,
-      cpf: credentials.cpf,
-      idPlano: credentials.idPlano,
-      autenticadoEm: new Date(agora).toISOString(),
-      expiraEm: new Date(expiraEmMs).toISOString(),
-      modoExecucao: 'DRY_RUN'
-    };
-
-    // Armazenar por usuário se userId fornecido
-    if (userId) {
-      definirSessaoUsuario(userId, sessao);
-    }
-
-    globalAuthState.status = 'authenticated';
-    globalAuthState.modoExecucao = 'DRY_RUN';
-    globalAuthState.autenticadoEm = sessao.autenticadoEm;
-    globalAuthState.expiresAt = sessao.expiraEm;
-    globalAuthState.isExpired = false;
-    globalAuthState.tempoRestanteMinutos = TEMPO_VIDA_SESSAO_MINUTOS;
-    globalAuthState.isOnline = true;
-    globalAuthState.meteorLoginToken = mockToken;
-    globalAuthState.meteorUserId = mockUserId;
-    globalAuthState.cookiesCount = 3;
-    globalAuthState.ultimoPing = new Date(agora).toISOString();
-
-    addAuthLog(
-      `Sessão DRY_RUN inicializada com sucesso. Conexão simulada DDP ativa para o plano ${credentials.idPlano}.`,
-      'success'
-    );
-
-    return userId ? obterStatusSessaoUsuario(userId) : obterStatusSessaoAtualizada();
-  }
-
-  // MODO LIVE: Autenticação real via navegador Playwright headless no Sebrae ID oficial
+  globalAuthState.modoExecucao = 'LIVE';
+  const cpfMascarado = `${credentials.cpf.substring(0, 3)}.***.***-${credentials.cpf.slice(-2)}`;
   addAuthLog(`[LIVE] Iniciando autenticação OIDC oficial no Sebrae ID para CPF ${cpfMascarado}...`, 'info');
 
   try {
     const result = await pnboxOidcLoginViaPlaywright(credentials.cpf, credentials.password, onProgress);
-
     const agora = Date.now();
-    const expiraEmMs = result.expiresAt || (agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000);
-
     const sessao: SessaoPnbox = {
       cookiesPnbox: result.pnboxCookies,
       idToken: result.idToken,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
-      meteorSessionId: undefined, // Preenchido na conexão DDP
+      meteorSessionId: undefined,
       meteorUserId: (result as any).meteorUserId,
       cpf: credentials.cpf,
       idPlano: credentials.idPlano,
       autenticadoEm: new Date(agora).toISOString(),
-      expiraEm: new Date(expiraEmMs).toISOString(),
+      expiraEm: new Date(result.expiresAt || agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000).toISOString(),
       modoExecucao: 'LIVE',
       planosPnbox: (result as any).planosPnbox || []
     };
-
-    // Armazenar por usuário se userId fornecido
-    if (userId) {
-      definirSessaoUsuario(userId, sessao);
-    }
-
+    if (userId) definirSessaoUsuario(userId, sessao);
     globalAuthState.status = 'authenticated';
     globalAuthState.modoExecucao = 'LIVE';
     globalAuthState.autenticadoEm = sessao.autenticadoEm;
@@ -417,22 +173,17 @@ export async function iniciarSessaoPlaywright(
     globalAuthState.tempoRestanteMinutos = TEMPO_VIDA_SESSAO_MINUTOS;
     globalAuthState.isOnline = true;
     globalAuthState.ultimoPing = new Date(agora).toISOString();
-
-    addAuthLog(
-      `Autenticação OIDC LIVE concluída com sucesso. Tokens Sebrae prontos para DDP.`,
-      'success'
-    );
-
+    addAuthLog('Autenticação OIDC LIVE concluída com sucesso. Tokens Sebrae prontos para DDP.', 'success');
     return userId ? obterStatusSessaoUsuario(userId) : obterStatusSessaoAtualizada();
   } catch (err: any) {
     globalAuthState.status = 'failed';
     globalAuthState.isOnline = false;
     addAuthLog(`Falha na autenticação OIDC: ${err.message}`, 'error');
     if (userId) {
-      const uState = obterStatusSessaoUsuario(userId);
-      uState.status = 'failed';
-      uState.isOnline = false;
-      return uState;
+      const state = obterStatusSessaoUsuario(userId);
+      state.status = 'failed';
+      state.isOnline = false;
+      return state;
     }
     return globalAuthState;
   }
