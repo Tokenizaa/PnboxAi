@@ -6,7 +6,6 @@ import { compararJsonComSchema } from "../../automation/schemaValidator";
 export interface AdapterOptions {
   idPlano?: string;
   skipValidation?: boolean;
-  /** Mantido por compatibilidade; nunca habilita dados de exemplo. */
   strictMode?: boolean;
 }
 
@@ -76,72 +75,57 @@ export class PnboxAdapter {
     if (m.customer.segments.length === 0) return [];
     return m.customer.segments.map((seg) => ({ idPlano, descricao: seg.name, variavel1: seg.demographics.ageRange, variavel1Oposto: undefined, variavel2: seg.behaviors[0], variavel2Oposto: undefined, segmento: seg.description.substring(0, 200) }));
   }
-
   private mapGeradorPersonas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.customer.personas.length === 0) return [];
     return m.customer.personas.map((p) => ({ idPlano, nome: p.name, idade: p.age, profissao: p.profession, escolaridade: p.education, renda: p.income, habitos: p.habits, dores: p.painPoints.join("; "), objetivos: p.goals.join("; ") }));
   }
-
   private mapJornadaCliente(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.customer.journey.length === 0) return [];
     return m.customer.journey.map((j) => ({ idPlano, etapa: j.stage, acoes: j.actions, pontosContato: j.touchpoints.join("; "), emocoes: j.emotions, oportunidadesMelhoria: j.opportunities.join("; ") }));
   }
-
   private mapPropostaValor(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const vp = m.valueProposition;
     return [{ idPlano, tarefasCliente: vp.customerJobs.join("; "), dores: vp.pains.join("; "), ganhos: vp.gains.join("; "), produtosServicos: vp.productsServices.join("; "), aliviadoresDores: vp.painRelievers.join("; "), criadoresGanhos: vp.gainCreators.join("; ") }];
   }
-
   private mapAnaliseConcorrencia(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.competition.competitors.length === 0) return [];
     return m.competition.competitors.map((c) => ({ idPlano, nomeConcorrente: c.name, pontosFortes: c.strengths.join("; "), pontosFracos: c.weaknesses.join("; "), preco: c.pricing, diferencial: c.differentiators.join("; ") }));
   }
-
   private mapForcasFraquezas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const items = [...m.swot.strengths.map((s) => ({ tipo: "forca", descricao: s.description })), ...m.swot.weaknesses.map((w) => ({ tipo: "fraqueza", descricao: w.description }))];
     return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao }));
   }
-
   private mapOportunidadesAmeacas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const items = [...m.swot.opportunities.map((o) => ({ tipo: "oportunidade", descricao: o.description })), ...m.swot.threats.map((t) => ({ tipo: "ameaca", descricao: t.description }))];
     return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao }));
   }
-
   private mapAnaliseSwot(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const s = m.swot.strategies;
     return [{ idPlano, estrategiaDesenvolvimento: s.development, estrategiaManutencao: s.maintenance, estrategiaSobrevivencia: s.survival }];
   }
-
   private mapInvestimentoFixo(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     return m.financials.investment.fixed.map((item) => ({ idPlano, descricao: item.item, quantidade: item.quantity, valorUnitario: item.unitCost, subtotal: item.total }));
   }
-
   private mapInvestimentoPreOperacional(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     return m.financials.investment.preOperational.map((item) => ({ idPlano, descricao: item.item, valor: item.total }));
   }
-
   private mapEstoqueInicial(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     return m.financials.investment.initialStock.map((item) => ({ idPlano, descricao: item.item, quantidade: item.quantity, valorUnitario: item.unitCost }));
   }
-
   private mapCapitalGiro(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const wc = m.financials.investment.workingCapital;
     if (wc === 0) return [];
     return [{ idPlano, reservaFinanceira: wc }];
   }
-
   private mapCustoFixo(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     return m.financials.costs.fixed.map((item) => ({ idPlano, descricao: item.item, valor: item.monthlyValue }));
   }
-
   private mapProdutoServico(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     return m.financials.revenue.products.map((p) => ({ idPlano, descricao: p.product, precoVenda: p.unitPrice, custoUnitario: p.unitCost, estimativaVendasMes: p.estimatedQuantity }));
   }
-
   private mapQuadroExperimentacao(_m: CanonicalBusinessModel, _idPlano: string): Record<string, unknown>[] {
     return [];
   }
-
   private mapFunilVendas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     return m.marketing.channels.map((ch) => ({ idPlano, nome: ch.name, orcamento: ch.monthlyInvestment }));
   }
@@ -169,7 +153,7 @@ export class PnboxAdapter {
           }
         });
       }
-      const status = errors.length === 0 ? (items.length === 0 ? "missing" : "valid") : "error";
+      const status: "valid" | "error" | "missing" = errors.length === 0 ? (items.length === 0 ? "missing" : "valid") : "error";
       const detail = { ferramentaId: ferramenta.id, collectionName: ferramenta.collectionName, status, itemsValidated: items.length, errors, warnings };
       detailsByCollection[ferramenta.collectionName] = detail;
       detailsByTool[ferramenta.id] = detail;
