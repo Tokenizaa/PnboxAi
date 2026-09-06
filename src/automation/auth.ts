@@ -4,7 +4,6 @@ import { PnboxConnectionStep } from './connectionJob';
 
 /** Autenticação PNBOX exclusivamente LIVE. Não há sessão, credencial ou estado PNBOX sintético. */
 export interface Credentials { cpf: string; password: string; idPlano: string; }
-
 export const CREDENCIAIS_PADRAO = { cpf: '', password: '', idPlano: '' };
 export const CREDENCIAIS_PADRAO_DEPRECATED = CREDENCIAIS_PADRAO;
 
@@ -35,22 +34,17 @@ export function obterSessaoUsuario(userId: string): SessaoPnbox | null {
   }
   return sessao;
 }
-
 export function definirSessaoUsuario(userId: string, sessao: SessaoPnbox): void {
   if (sessao.modoExecucao !== 'LIVE') throw new Error('Somente sessões LIVE do PNBOX podem ser registradas.');
   userSessions.set(userId, sessao);
 }
-
 export function removerSessaoUsuario(userId: string): void { userSessions.delete(userId); }
-
-export function obterCookiesPnboxUsuario(userId: string): string | null {
-  return obterSessaoUsuario(userId)?.cookiesPnbox || null;
-}
+export function obterCookiesPnboxUsuario(userId: string): string | null { return obterSessaoUsuario(userId)?.cookiesPnbox || null; }
 
 export const globalAuthState: AuthSessionState = {
-  status: 'idle', cpf: '', idPlano: '', modoExecucao: 'DRY_RUN', logs: [{
+  status: 'idle', cpf: '', idPlano: '', modoExecucao: 'LIVE', logs: [{
     timestamp: new Date().toISOString(),
-    mensagem: 'Autenticação PNBOX pronta. Somente conexão LIVE oficial é permitida.',
+    mensagem: 'Integração PNBOX pronta. Somente conexão LIVE oficial é permitida.',
     level: 'info'
   }]
 };
@@ -65,7 +59,7 @@ export function addAuthLog(mensagem: string, level: 'info' | 'warn' | 'error' | 
 export function obterStatusSessaoUsuario(userId: string): AuthSessionState {
   const sessao = obterSessaoUsuario(userId);
   const state: AuthSessionState = {
-    status: 'idle', cpf: '', idPlano: '', modoExecucao: 'DRY_RUN', logs: [...globalAuthState.logs],
+    status: 'idle', cpf: '', idPlano: '', modoExecucao: 'LIVE', logs: [...globalAuthState.logs],
     isExpired: false, tempoRestanteMinutos: 0, isOnline: false
   };
   if (!sessao) return state;
@@ -83,7 +77,7 @@ export function obterStatusSessaoUsuario(userId: string): AuthSessionState {
   state.expiresAt = sessao.expiraEm;
   state.cookiesCount = sessao.cookiesPnbox.split(';').length;
   state.isOnline = isValid;
-  state.modoExecucao = isValid ? 'LIVE' : 'DRY_RUN';
+  state.modoExecucao = 'LIVE';
   state.ultimoPing = new Date().toISOString();
   state.planosPnbox = sessao.planosPnbox || [];
   return state;
@@ -93,12 +87,10 @@ export function atualizarPlanosSessao(userId: string, planos: any[]): void {
   const sessao = obterSessaoUsuario(userId);
   if (sessao) { sessao.planosPnbox = planos; userSessions.set(userId, sessao); }
 }
-
 export function obterStatusSessaoAtualizada(): AuthSessionState {
   const firstUserId = userSessions.keys().next().value;
   return firstUserId ? obterStatusSessaoUsuario(firstUserId) : globalAuthState;
 }
-
 export function simularExpiracaoSessao(): AuthSessionState {
   userSessions.clear();
   globalAuthState.status = 'expired';
@@ -111,10 +103,6 @@ export function simularExpiracaoSessao(): AuthSessionState {
   return globalAuthState;
 }
 
-/**
- * Autentica exclusivamente via OIDC/Playwright real do Sebrae ID.
- * DRY_RUN foi removido para impedir que uma sessão sintética alcance o executor DDP.
- */
 export async function iniciarSessaoPlaywright(
   credentials: Credentials | null = null,
   consentimentoAceito = false,
@@ -139,14 +127,12 @@ export async function iniciarSessaoPlaywright(
     addAuthLog('CPF, senha e ID de plano PNBOX real são obrigatórios.', 'error');
     return userId ? obterStatusSessaoUsuario(userId) : globalAuthState;
   }
-
   globalAuthState.status = 'authenticating';
   globalAuthState.cpf = credentials.cpf;
   globalAuthState.idPlano = credentials.idPlano;
   globalAuthState.modoExecucao = 'LIVE';
   const cpfMascarado = `${credentials.cpf.substring(0, 3)}.***.***-${credentials.cpf.slice(-2)}`;
   addAuthLog(`[LIVE] Iniciando autenticação OIDC oficial no Sebrae ID para CPF ${cpfMascarado}...`, 'info');
-
   try {
     const result = await pnboxOidcLoginViaPlaywright(credentials.cpf, credentials.password, onProgress);
     const agora = Date.now();
