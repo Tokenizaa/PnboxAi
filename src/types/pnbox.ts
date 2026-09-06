@@ -93,6 +93,7 @@ export interface AuthSessionState {
   tempoRestanteFormatado?: string;
   isOnline?: boolean;
   ultimoPing?: string;
+  planosPnbox?: PlanoCriadoInfo[];
 }
 
 export interface BatchQueueItem {
@@ -195,6 +196,8 @@ export interface PlanoCriadoInfo {
   ferramentasPreenchidas?: number;
   categoriaObjetivo?: string;
   icone?: string;
+  sincronizadoPnbox?: boolean;
+  ultimaSincronizacao?: string;
 }
 
 // Provedores de IA

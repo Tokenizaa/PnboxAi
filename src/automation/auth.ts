@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { AuthSessionState } from '../types/pnbox';
 import { pnboxOidcLoginViaPlaywright } from './oidcPnboxPlaywright';
 import { getEncryptedPnboxCredentials } from '../utils/secureStorage';
@@ -57,26 +59,74 @@ export interface SessaoPnbox {
   idPlano: string;
   autenticadoEm: string;
   expiraEm: string;
+  modoExecucao?: 'DRY_RUN' | 'LIVE';
+  planosPnbox?: any[];
 }
 
 // Tempo de vida da sessão em minutos (TTL do token OIDC + margem)
 export const TEMPO_VIDA_SESSAO_MINUTOS = 50;
 
 /**
- * Cache de sessões PNBOX por usuário (em memória, por processo).
+ * Cache de sessões PNBOX por usuário.
  * Chave: userId (string)
- * Não é global único - cada usuário tem sua sessão isolada.
+ * Mantido em memória e sincronizado em disco (.data/pnbox_sessions.json)
+ * para resistir a reloads de página e reinicializações do processo.
  */
 const userSessions = new Map<string, SessaoPnbox>();
+const SESSIONS_CACHE_FILE = path.join(process.cwd(), '.data', 'pnbox_sessions.json');
+
+function salvarSessoesEmDisco(): void {
+  try {
+    const dir = path.dirname(SESSIONS_CACHE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const obj: Record<string, SessaoPnbox> = {};
+    for (const [uid, sess] of userSessions.entries()) {
+      if (new Date(sess.expiraEm).getTime() > Date.now()) {
+        obj[uid] = sess;
+      }
+    }
+    fs.writeFileSync(SESSIONS_CACHE_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[PNBOX Auth] Falha ao salvar sessões em disco:', err);
+  }
+}
+
+function carregarSessoesDoDisco(): void {
+  try {
+    if (!fs.existsSync(SESSIONS_CACHE_FILE)) return;
+    const raw = fs.readFileSync(SESSIONS_CACHE_FILE, 'utf8');
+    const obj = JSON.parse(raw);
+    const now = Date.now();
+    for (const [uid, sess] of Object.entries(obj)) {
+      const s = sess as SessaoPnbox;
+      if (s.expiraEm && new Date(s.expiraEm).getTime() > now) {
+        userSessions.set(uid, s);
+      }
+    }
+    if (userSessions.size > 0) {
+      console.log(`[PNBOX Auth] ${userSessions.size} sessão(ões) ativa(s) restaurada(s) do disco.`);
+    }
+  } catch (err) {
+    console.warn('[PNBOX Auth] Falha ao carregar sessões do disco:', err);
+  }
+}
+
+// Inicializa restaurando sessões válidas
+carregarSessoesDoDisco();
 
 /**
  * Obtém a sessão PNBOX de um usuário específico.
  */
 export function obterSessaoUsuario(userId: string): SessaoPnbox | null {
-  const sessao = userSessions.get(userId);
+  let sessao = userSessions.get(userId);
+  if (!sessao) {
+    carregarSessoesDoDisco();
+    sessao = userSessions.get(userId);
+  }
   if (!sessao) return null;
   if (new Date(sessao.expiraEm).getTime() <= Date.now()) {
     userSessions.delete(userId);
+    salvarSessoesEmDisco();
     return null;
   }
   return sessao;
@@ -87,6 +137,7 @@ export function obterSessaoUsuario(userId: string): SessaoPnbox | null {
  */
 export function definirSessaoUsuario(userId: string, sessao: SessaoPnbox): void {
   userSessions.set(userId, sessao);
+  salvarSessoesEmDisco();
 }
 
 /**
@@ -94,6 +145,7 @@ export function definirSessaoUsuario(userId: string, sessao: SessaoPnbox): void 
  */
 export function removerSessaoUsuario(userId: string): void {
   userSessions.delete(userId);
+  salvarSessoesEmDisco();
 }
 
 /**
@@ -146,7 +198,7 @@ export function obterStatusSessaoUsuario(userId: string): AuthSessionState {
     status: 'idle',
     cpf: '',
     idPlano: '',
-    modoExecucao: globalAuthState.modoExecucao,
+    modoExecucao: 'DRY_RUN',
     logs: [...globalAuthState.logs],
     isExpired: false,
     tempoRestanteMinutos: 0,
@@ -154,18 +206,19 @@ export function obterStatusSessaoUsuario(userId: string): AuthSessionState {
   };
 
   if (!sessao) {
-    state.status = 'idle';
-    state.isExpired = false;
-    state.tempoRestanteMinutos = 0;
-    state.isOnline = false;
     return state;
   }
 
-  const restanteMs = new Date(sessao.expiraEm).getTime() - Date.now();
-  const restanteMin = Math.max(0, Math.round(restanteMs / 60000));
+  const agora = Date.now();
+  const expiraEmMs = new Date(sessao.expiraEm).getTime();
+  const restanteMs = expiraEmMs - agora;
+  const restanteMin = Math.max(0, Math.floor(restanteMs / 60000));
 
-  state.status = restanteMin > 0 ? 'authenticated' : 'expired';
-  state.isExpired = restanteMin <= 0;
+  const hasValidTokens = !!sessao.idToken && sessao.idToken.length >= 20 && !!sessao.cookiesPnbox;
+  const isValid = restanteMin > 0 && hasValidTokens;
+
+  state.status = isValid ? 'authenticated' : 'expired';
+  state.isExpired = !isValid;
   state.tempoRestanteMinutos = restanteMin;
   state.cpf = sessao.cpf;
   state.idPlano = sessao.idPlano;
@@ -178,10 +231,23 @@ export function obterStatusSessaoUsuario(userId: string): AuthSessionState {
   state.cookiesCount = sessao.cookiesPnbox
     ? sessao.cookiesPnbox.split(';').length
     : 0;
-  state.isOnline = true;
+  state.isOnline = isValid;
+  state.modoExecucao = isValid ? (sessao.modoExecucao || 'LIVE') : 'DRY_RUN';
   state.ultimoPing = new Date().toISOString();
+  state.planosPnbox = sessao.planosPnbox || [];
 
   return state;
+}
+
+/**
+ * Atualiza os planos em cache na sessão do usuário.
+ */
+export function atualizarPlanosSessao(userId: string, planos: any[]): void {
+  const sessao = obterSessaoUsuario(userId);
+  if (sessao) {
+    sessao.planosPnbox = planos;
+    definirSessaoUsuario(userId, sessao);
+  }
 }
 
 /**
@@ -285,7 +351,8 @@ export async function iniciarSessaoPlaywright(
       cpf: credentials.cpf,
       idPlano: credentials.idPlano,
       autenticadoEm: new Date(agora).toISOString(),
-      expiraEm: new Date(expiraEmMs).toISOString()
+      expiraEm: new Date(expiraEmMs).toISOString(),
+      modoExecucao: 'DRY_RUN'
     };
 
     // Armazenar por usuário se userId fornecido
@@ -294,6 +361,7 @@ export async function iniciarSessaoPlaywright(
     }
 
     globalAuthState.status = 'authenticated';
+    globalAuthState.modoExecucao = 'DRY_RUN';
     globalAuthState.autenticadoEm = sessao.autenticadoEm;
     globalAuthState.expiresAt = sessao.expiraEm;
     globalAuthState.isExpired = false;
@@ -331,7 +399,9 @@ export async function iniciarSessaoPlaywright(
       cpf: credentials.cpf,
       idPlano: credentials.idPlano,
       autenticadoEm: new Date(agora).toISOString(),
-      expiraEm: new Date(expiraEmMs).toISOString()
+      expiraEm: new Date(expiraEmMs).toISOString(),
+      modoExecucao: 'LIVE',
+      planosPnbox: (result as any).planosPnbox || []
     };
 
     // Armazenar por usuário se userId fornecido
@@ -340,6 +410,7 @@ export async function iniciarSessaoPlaywright(
     }
 
     globalAuthState.status = 'authenticated';
+    globalAuthState.modoExecucao = 'LIVE';
     globalAuthState.autenticadoEm = sessao.autenticadoEm;
     globalAuthState.expiresAt = sessao.expiraEm;
     globalAuthState.isExpired = false;
@@ -357,6 +428,12 @@ export async function iniciarSessaoPlaywright(
     globalAuthState.status = 'failed';
     globalAuthState.isOnline = false;
     addAuthLog(`Falha na autenticação OIDC: ${err.message}`, 'error');
+    if (userId) {
+      const uState = obterStatusSessaoUsuario(userId);
+      uState.status = 'failed';
+      uState.isOnline = false;
+      return uState;
+    }
     return globalAuthState;
   }
 }

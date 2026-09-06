@@ -38,6 +38,8 @@ interface PnboxToolsMatrixProps {
   onBackToPlans: () => void;
   onExecuteAllWithAi: () => void;
   onSyncAllToSebrae: () => void;
+  onPullFromSebrae?: () => void;
+  onBidirectionalSync?: () => void;
   onOpenBackendSettings: () => void;
   onQuickGenerateToolAi: (ferramentaId: string) => void;
   isSyncing?: boolean;
@@ -51,6 +53,8 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
   onBackToPlans,
   onExecuteAllWithAi,
   onSyncAllToSebrae,
+  onPullFromSebrae,
+  onBidirectionalSync,
   onOpenBackendSettings,
   onQuickGenerateToolAi,
   isSyncing = false
@@ -203,30 +207,42 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={onExecuteAllWithAi}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-pink-600/30 transition-all hover:scale-105 active:scale-95"
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-pink-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
               title="Preencher todas as 14 ferramentas automaticamente com IA Gemini"
             >
               <Sparkles className="w-4 h-4 text-pink-200" />
               <span>Preencher Plano com IA (1 Clique)</span>
             </button>
 
+            {onPullFromSebrae && (
+              <button
+                onClick={onPullFromSebrae}
+                disabled={isSyncing}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-full text-xs sm:text-sm font-medium transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                title="Puxar todas as ferramentas salvas no Sebrae PNBOX para este plano"
+              >
+                <Cloud className="w-4 h-4 text-indigo-300" />
+                <span>Puxar do Sebrae</span>
+              </button>
+            )}
+
             <button
-              onClick={onSyncAllToSebrae}
+              onClick={onBidirectionalSync || onSyncAllToSebrae}
               disabled={isSyncing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-[#1877f2] hover:bg-[#166fe5] text-white rounded-full text-xs sm:text-sm font-semibold shadow-md transition-all active:scale-95 disabled:opacity-50"
-              title="Sincronizar no Sebrae PNBOX oficial"
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#1877f2] hover:bg-[#166fe5] text-white rounded-full text-xs sm:text-sm font-semibold shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+              title="Sincronização Bidirecional com o Sebrae PNBOX"
             >
               {isSyncing ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
               ) : (
-                <Cloud className="w-4 h-4" />
+                <RefreshCw className="w-4 h-4" />
               )}
-              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar no Sebrae'}</span>
+              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar Bidirecional'}</span>
             </button>
 
             <button
               onClick={onOpenBackendSettings}
-              className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-slate-300 hover:text-white transition-colors"
+              className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-slate-300 hover:text-white transition-colors cursor-pointer"
               title="Diagnóstico de Conexão e Ferramentas Backend"
             >
               <Settings className="w-4 h-4" />

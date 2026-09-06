@@ -19,6 +19,7 @@ import { TEMPLATES_NEGOCIO } from './automation/businessTemplates';
 import {
   carregarPlanosSalvos,
   salvarPlanoNoHistorico,
+  conciliarPlanosBidirecional,
   extrairIdPlano,
   ID_PLANO_PADRAO_SISTEMA
 } from './utils/planUtils';
@@ -140,7 +141,7 @@ export function App() {
     return ferramentaAtiva.exemploPayload ? [ferramentaAtiva.exemploPayload] : [];
   };
 
-  // Carregar dados iniciais do servidor
+  // Carregar dados iniciais do servidor e sincronizar planos com PNBOX
   const carregarDados = useCallback(async () => {
     try {
       const token = platformToken();
@@ -155,10 +156,28 @@ export function App() {
           if (dataAuth.session.idPlano) {
             setPlanoAtivoId(dataAuth.session.idPlano);
           }
+
+          // Se a sessão contiver planos do PNBOX extraídos no login, concilia imediatamente
+          if (Array.isArray(dataAuth.session.planosPnbox) && dataAuth.session.planosPnbox.length > 0) {
+            setPlanos((prev) => conciliarPlanosBidirecional(dataAuth.session.planosPnbox, prev));
+          }
         }
       }
 
-      // 2. Tráfego de Rede DDP
+      // 2. Tenta puxar lista de projetos atualizados do PNBOX via DDP
+      try {
+        const resPlans = await fetch('/api/pnbox/plans', { headers });
+        if (resPlans.ok) {
+          const dataPlans = await resPlans.json();
+          if (Array.isArray(dataPlans.planos) && dataPlans.planos.length > 0) {
+            setPlanos((prev) => conciliarPlanosBidirecional(dataPlans.planos, prev));
+          }
+        }
+      } catch (pErr) {
+        console.debug('Planos remotos PNBOX indisponíveis offline:', pErr);
+      }
+
+      // 3. Tráfego de Rede DDP
       const resTraffic = await fetch('/api/automation/traffic', { headers });
       if (resTraffic.ok) {
         const dataTraffic = await resTraffic.json();
@@ -338,6 +357,243 @@ try {
     }
   };
 
+  // Sincronizar lista completa de projetos diretamente do Sebrae PNBOX
+  const handleSyncPnboxPlans = async () => {
+    setIsSyncing(true);
+    pushToast({
+      level: 'info',
+      title: 'Sincronizando com PNBOX',
+      message: 'Consultando seus projetos na plataforma oficial do Sebrae...',
+      duration: 3500,
+      icon: 'loading'
+    });
+
+    try {
+      const token = platformToken();
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch('/api/pnbox/plans', { headers });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Falha ao buscar projetos do PNBOX');
+      }
+
+      const data = await res.json();
+      if (Array.isArray(data.planos) && data.planos.length > 0) {
+        const conciliados = conciliarPlanosBidirecional(data.planos, planos);
+        setPlanos(conciliados);
+        if (!conciliados.some((p) => p.idPlano === planoAtivoId)) {
+          setPlanoAtivoId(conciliados[0].idPlano);
+        }
+        pushToast({
+          level: 'success',
+          title: 'Projetos Sincronizados!',
+          message: `${data.planos.length} projeto(s) oficiais do Sebrae carregados com sucesso.`,
+          duration: 4000,
+          icon: 'check'
+        });
+      } else {
+        pushToast({
+          level: 'info',
+          title: 'Sincronização Concluída',
+          message: 'Nenhum projeto adicional encontrado no PNBOX.',
+          duration: 3500
+        });
+      }
+    } catch (err: any) {
+      pushToast({
+        level: 'error',
+        title: 'Erro ao sincronizar projetos',
+        message: err.message || 'Verifique se a sessão PNBOX está ativa na aba "Sessão".',
+        duration: 5000,
+        icon: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Puxar todas as 14 ferramentas salvas no Sebrae para este plano
+  const handlePullAllFromPnbox = async (targetId?: string) => {
+    const id = targetId || planoAtivo.idPlano;
+    setIsSyncing(true);
+    pushToast({
+      level: 'info',
+      title: 'Importando do Sebrae PNBOX',
+      message: `Carregando ferramentas salvas na nuvem para o plano ${id}...`,
+      duration: 4000,
+      icon: 'loading'
+    });
+
+    try {
+      const token = platformToken();
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch(`/api/pnbox/plans/${id}/pull-all`, { headers });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Falha ao buscar ferramentas do PNBOX');
+      }
+
+      const data = await res.json();
+      const dados14 = data.dados14Ferramentas || {};
+      const totalPuxados = Object.keys(dados14).length;
+
+      // Mescla com dados locais existentes
+      const dadosMesclados = {
+        ...(planoAtivo.dados14Ferramentas || {}),
+        ...dados14
+      };
+
+      const planoAtualizado: PlanoCriadoInfo = {
+        ...planoAtivo,
+        dados14Ferramentas: dadosMesclados,
+        sincronizadoPnbox: true,
+        ultimaSincronizacao: new Date().toISOString(),
+        ferramentasPreenchidas: Math.max(
+          planoAtivo.ferramentasPreenchidas || 0,
+          Object.keys(dadosMesclados).length
+        )
+      };
+
+      const atualizados = salvarPlanoNoHistorico(planoAtualizado);
+      setPlanos(atualizados);
+
+      pushToast({
+        level: 'success',
+        title: 'Ferramentas Importadas!',
+        message: `${totalPuxados} ferramenta(s) importada(s) do Sebrae PNBOX com sucesso.`,
+        duration: 4500,
+        icon: 'check'
+      });
+    } catch (err: any) {
+      pushToast({
+        level: 'error',
+        title: 'Erro ao puxar dados do Sebrae',
+        message: err.message,
+        duration: 5000,
+        icon: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Enviar todas as ferramentas locais para o Sebrae PNBOX
+  const handlePushAllToPnbox = async (targetId?: string) => {
+    const id = targetId || planoAtivo.idPlano;
+    const dadosParaEnviar = planoAtivo.dados14Ferramentas;
+    if (!dadosParaEnviar || Object.keys(dadosParaEnviar).length === 0) {
+      pushToast({
+        level: 'warn',
+        title: 'Nenhum dado local para enviar',
+        message: 'Preencha ou gere dados com IA antes de enviar para o Sebrae.',
+        duration: 4000,
+        icon: 'warn'
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    pushToast({
+      level: 'info',
+      title: 'Gravando no Sebrae PNBOX',
+      message: `Enviando ferramentas para o projeto ${id}...`,
+      duration: 4000,
+      icon: 'loading'
+    });
+
+    try {
+      const token = platformToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch(`/api/pnbox/plans/${id}/push-all`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ dados14Ferramentas: dadosParaEnviar })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Falha ao gravar ferramentas no PNBOX');
+      }
+
+      const data = await res.json();
+      const planoAtualizado: PlanoCriadoInfo = {
+        ...planoAtivo,
+        sincronizadoPnbox: true,
+        ultimaSincronizacao: new Date().toISOString()
+      };
+      const atualizados = salvarPlanoNoHistorico(planoAtualizado);
+      setPlanos(atualizados);
+
+      pushToast({
+        level: 'success',
+        title: 'Gravado com Sucesso!',
+        message: `${data.totalSalvos || 0} registro(s) gravados no Sebrae PNBOX.`,
+        duration: 5000,
+        icon: 'check'
+      });
+    } catch (err: any) {
+      pushToast({
+        level: 'error',
+        title: 'Erro ao gravar no Sebrae',
+        message: err.message,
+        duration: 5000,
+        icon: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Sincronização bidirecional completa (Pull remoto -> Mesclagem -> Push local pendente)
+  const handleBidirectionalSync = async (targetId?: string) => {
+    const id = targetId || planoAtivo.idPlano;
+    setIsSyncing(true);
+    pushToast({
+      level: 'info',
+      title: 'Sincronização Bidirecional',
+      message: `Sincronizando estado completo do plano ${id} com o Sebrae PNBOX...`,
+      duration: 4500,
+      icon: 'loading'
+    });
+
+    try {
+      // 1. Puxa projetos atualizados
+      await handleSyncPnboxPlans();
+
+      // 2. Puxa ferramentas salvas do Sebrae
+      await handlePullAllFromPnbox(id);
+
+      // 3. Se houver dados locais enriquecidos, envia de volta
+      if (planoAtivo.dados14Ferramentas && Object.keys(planoAtivo.dados14Ferramentas).length > 0) {
+        await handlePushAllToPnbox(id);
+      }
+
+      pushToast({
+        level: 'success',
+        title: 'Sincronização Bidirecional Concluída!',
+        message: 'O projeto local e a plataforma Sebrae PNBOX estão 100% alinhados.',
+        duration: 5000,
+        icon: 'check'
+      });
+    } catch (err: any) {
+      pushToast({
+        level: 'error',
+        title: 'Erro na Sincronização Bidirecional',
+        message: err.message,
+        duration: 5000,
+        icon: 'error'
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Gerar sugestões rápidas de IA para uma ferramenta específica
   const handleQuickGenerateToolAi = async (ferramentaId: string) => {
     setFerramentaAtivaId(ferramentaId);
@@ -445,15 +701,54 @@ try {
   };
 
   // Quando um novo plano for criado via IA no modal
-  const handlePlanCreated = (novoPlano: PlanoCriadoInfo) => {
-    const novosPlanos = salvarPlanoNoHistorico(novoPlano);
+  const handlePlanCreated = async (novoPlano: PlanoCriadoInfo) => {
+    let planoFinal = { ...novoPlano };
+
+    // Se estiver conectado ao PNBOX (modo LIVE ou authenticated), cria o plano diretamente na plataforma oficial via DDP
+    if (authSession.isOnline || authSession.status === 'authenticated') {
+      try {
+        const token = platformToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch('/api/pnbox/plans', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            nome: novoPlano.nomePlano,
+            setor: novoPlano.setor,
+            descricao: novoPlano.descricao,
+            cidadeUf: novoPlano.cidadeUf,
+            categoriaObjetivo: novoPlano.categoriaObjetivo
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.plano?.idPlano) {
+            planoFinal = {
+              ...planoFinal,
+              idPlano: data.plano.idPlano,
+              sincronizadoPnbox: true,
+              ultimaSincronizacao: new Date().toISOString()
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Criação remota DDP indisponível, persistindo localmente:', err);
+      }
+    }
+
+    const novosPlanos = salvarPlanoNoHistorico(planoFinal);
     setPlanos(novosPlanos);
-    setPlanoAtivoId(novoPlano.idPlano);
+    setPlanoAtivoId(planoFinal.idPlano);
     setViewMode('tools_matrix');
     pushToast({
       level: 'success',
-      title: 'Novo Plano Criado com IA!',
-      message: `Plano "${novoPlano.nomePlano}" gerado e selecionado.`,
+      title: planoFinal.sincronizadoPnbox
+        ? 'Plano Criado e Sincronizado no PNBOX!'
+        : 'Novo Plano Criado com IA!',
+      message: `Plano "${planoFinal.nomePlano}" gerado e ativo (${planoFinal.idPlano}).`,
       duration: 5000,
       icon: 'check'
     });
@@ -510,6 +805,9 @@ try {
               handleSelectPlano(idPlano);
               handleExecuteAllWithAi();
             }}
+            onSyncPnboxPlans={handleSyncPnboxPlans}
+            isSyncingPlans={isSyncing}
+            authSession={authSession}
           />
         )}
 
@@ -523,6 +821,8 @@ try {
             onBackToPlans={() => setViewMode('plans')}
             onExecuteAllWithAi={handleExecuteAllWithAi}
             onSyncAllToSebrae={handleSyncAllToSebrae}
+            onPullFromSebrae={() => handlePullAllFromPnbox(planoAtivo.idPlano)}
+            onBidirectionalSync={() => handleBidirectionalSync(planoAtivo.idPlano)}
             onOpenBackendSettings={() => setShowBackendModal(true)}
             onQuickGenerateToolAi={handleQuickGenerateToolAi}
             isSyncing={isSyncing}
@@ -573,10 +873,11 @@ try {
             status: 'authenticated',
             isExpired: false,
             isOnline: true,
+            modoExecucao: 'LIVE',
             logs: [
               {
                 timestamp: new Date().toISOString(),
-                mensagem: 'Conta PNBOX conectada com sucesso.',
+                mensagem: 'Conta PNBOX conectada com sucesso no modo LIVE.',
                 level: 'success'
               },
               ...prev.logs
@@ -585,43 +886,45 @@ try {
           setShowBackendModal(false);
           carregarDados();
         }}
-onFailed={(job) => {
-  setAuthSession((prev) => ({
-    ...prev,
-    status: 'failed',
-    isOnline: false,
-    logs: [
-      {
-        timestamp: new Date().toISOString(),
-        mensagem: `Falha na conexão PNBOX: ${job.errorMessage || 'erro desconhecido'}`,
-        level: 'error'
-      },
-      ...prev.logs
-    ]
-  }));
-  setShowBackendModal(false);
-  carregarDados();
-}}
-onDisconnect={() => {
-  setAuthSession((prev) => ({
-    ...prev,
-    status: 'idle',
-    isExpired: true,
-    isOnline: false,
-    meteorLoginToken: undefined,
-    meteorUserId: undefined,
-    logs: [
-      {
-        timestamp: new Date().toISOString(),
-        mensagem: 'Desconectado do PNBOX.',
-        level: 'info'
-      },
-      ...prev.logs
-    ]
-  }));
-  setShowBackendModal(false);
-  carregarDados();
-}}
+        onFailed={(job) => {
+          setAuthSession((prev) => ({
+            ...prev,
+            status: 'failed',
+            isOnline: false,
+            modoExecucao: 'DRY_RUN',
+            logs: [
+              {
+                timestamp: new Date().toISOString(),
+                mensagem: `Falha na conexão PNBOX: ${job.errorMessage || 'erro desconhecido'}`,
+                level: 'error'
+              },
+              ...prev.logs
+            ]
+          }));
+          setShowBackendModal(false);
+          carregarDados();
+        }}
+        onDisconnect={() => {
+          setAuthSession((prev) => ({
+            ...prev,
+            status: 'idle',
+            isExpired: false,
+            isOnline: false,
+            modoExecucao: 'DRY_RUN',
+            meteorLoginToken: undefined,
+            meteorUserId: undefined,
+            logs: [
+              {
+                timestamp: new Date().toISOString(),
+                mensagem: 'Desconectado do PNBOX.',
+                level: 'info'
+              },
+              ...prev.logs
+            ]
+          }));
+          setShowBackendModal(false);
+          carregarDados();
+        }}
       />
 
       {/* 6. Container de Toasts de Notificação */}

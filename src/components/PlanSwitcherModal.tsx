@@ -14,7 +14,8 @@ import {
   Check,
   Globe,
   Layers,
-  FileCheck2
+  FileCheck2,
+  RefreshCw
 } from 'lucide-react';
 import { PlanoCriadoInfo } from '../types/pnbox';
 import {
@@ -31,6 +32,7 @@ interface PlanSwitcherModalProps {
   activePlanId: string;
   onSelectPlanId: (idPlano: string) => void;
   onNavigateTab?: (tab: string) => void;
+  onSyncPnbox?: () => Promise<void>;
 }
 
 export const PlanSwitcherModal: React.FC<PlanSwitcherModalProps> = ({
@@ -38,7 +40,8 @@ export const PlanSwitcherModal: React.FC<PlanSwitcherModalProps> = ({
   onClose,
   activePlanId,
   onSelectPlanId,
-  onNavigateTab
+  onNavigateTab,
+  onSyncPnbox
 }) => {
   const [inputValor, setInputValor] = useState('');
   const [nomeNovoPlano, setNomeNovoPlano] = useState('');
@@ -48,6 +51,7 @@ export const PlanSwitcherModal: React.FC<PlanSwitcherModalProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [modoAdicionar, setModoAdicionar] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSyncingModal, setIsSyncingModal] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -57,6 +61,17 @@ export const PlanSwitcherModal: React.FC<PlanSwitcherModalProps> = ({
       setModoAdicionar(false);
     }
   }, [isOpen]);
+
+  const handleTriggerSync = async () => {
+    if (!onSyncPnbox) return;
+    setIsSyncingModal(true);
+    try {
+      await onSyncPnbox();
+      setPlanos(carregarPlanosSalvos());
+    } finally {
+      setIsSyncingModal(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -293,10 +308,23 @@ export const PlanSwitcherModal: React.FC<PlanSwitcherModalProps> = ({
 
           {/* Lista de Planos Salvos / Cadastrados */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Planos Salvos no seu Navegador ({planosFiltrados.length})
-              </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  Planos Cadastrados ({planosFiltrados.length})
+                </h3>
+                {onSyncPnbox && (
+                  <button
+                    onClick={handleTriggerSync}
+                    disabled={isSyncingModal}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-[11px] font-medium rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                    title="Buscar e sincronizar projetos reais da sua conta Sebrae PNBOX"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncingModal ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingModal ? 'Sincronizando...' : 'Sincronizar PNBOX'}</span>
+                  </button>
+                )}
+              </div>
 
               <div className="relative w-48">
                 <Search className="w-3 h-3 text-slate-500 absolute left-2.5 top-2.5" />

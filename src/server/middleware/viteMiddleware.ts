@@ -7,7 +7,7 @@ export function configureViteMiddleware(app) {
     // Initialize Vite middleware asynchronously
     (async () => {
       try {
-        const vite = await (await import('vite')).createViteServer({
+        const vite = await (await import('vite')).createServer({
           server: { middlewareMode: true },
           appType: 'spa'
         });

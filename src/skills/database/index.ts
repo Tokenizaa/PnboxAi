@@ -16,6 +16,27 @@ export interface StoredRecord {
   [key: string]: unknown;
 }
 
+function toSnakeCase(record: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    result[snakeKey] = value;
+  }
+  return result;
+}
+
+function toCamelCase<T extends StoredRecord>(record: Record<string, unknown>): T {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    result[camelKey] = value;
+    if (camelKey !== key) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+}
+
 /**
  * DatabaseSkill - Fornece persistência real de dados para todos os Agents.
  * Conecta ao Supabase quando as credenciais estiverem disponíveis,
@@ -89,7 +110,7 @@ export class DatabaseSkill {
   /**
    * Salva ou atualiza um registro garantindo vínculo com userId
    */
-  public async insert<T extends StoredRecord>(table: string, record: T): Promise<T> {
+  public async insert<T extends StoredRecord>(table: string, record: T, userClient?: SupabaseClient): Promise<T> {
     if (!record.userId) {
       throw new Error(`[DatabaseSkill] Tentativa de inserir registro na tabela '${table}' sem userId associado.`);
     }
@@ -101,21 +122,25 @@ export class DatabaseSkill {
       updatedAt: now,
     };
 
-    if (this.supabase) {
-      const { data, error } = await this.supabase
+    const client = userClient || this.supabase;
+    if (client) {
+      const snakePayload = toSnakeCase(prepared);
+      const { data, error } = await client
         .from(table)
-        .upsert(prepared as any)
+        .upsert(snakePayload as any)
         .select()
         .single();
 
       if (error) {
-        console.warn(`[DatabaseSkill] Erro Supabase ao salvar em ${table}: ${error.message}. Salvando em fallback local.`);
-      } else if (data) {
-        return data as T;
+        console.error(`[DatabaseSkill] Erro Supabase ao salvar em ${table}: ${error.message}`);
+        throw new Error(`[DatabaseSkill] Erro Supabase ao salvar em ${table}: ${error.message}`);
+      }
+      if (data) {
+        return toCamelCase<T>(data);
       }
     }
 
-    // Fallback persistente local
+    // Persistência local usada apenas quando Supabase NÃO estiver configurado
     if (!this.localTables.has(table)) {
       this.localTables.set(table, new Map());
     }
@@ -127,15 +152,20 @@ export class DatabaseSkill {
   /**
    * Busca registros por userId
    */
-  public async findByUserId<T extends StoredRecord>(table: string, userId: string): Promise<T[]> {
-    if (this.supabase) {
-      const { data, error } = await this.supabase
+  public async findByUserId<T extends StoredRecord>(table: string, userId: string, userClient?: SupabaseClient): Promise<T[]> {
+    const client = userClient || this.supabase;
+    if (client) {
+      const { data, error } = await client
         .from(table)
         .select('*')
         .eq('user_id', userId);
 
-      if (!error && data) {
-        return data as T[];
+      if (error) {
+        console.error(`[DatabaseSkill] Erro Supabase ao consultar ${table}: ${error.message}`);
+        throw new Error(`[DatabaseSkill] Erro Supabase ao consultar ${table}: ${error.message}`);
+      }
+      if (data) {
+        return data.map((d) => toCamelCase<T>(d));
       }
     }
 
@@ -147,16 +177,21 @@ export class DatabaseSkill {
   /**
    * Busca registro por ID
    */
-  public async findById<T extends StoredRecord>(table: string, id: string): Promise<T | null> {
-    if (this.supabase) {
-      const { data, error } = await this.supabase
+  public async findById<T extends StoredRecord>(table: string, id: string, userClient?: SupabaseClient): Promise<T | null> {
+    const client = userClient || this.supabase;
+    if (client) {
+      const { data, error } = await client
         .from(table)
         .select('*')
         .eq('id', id)
         .maybeSingle();
 
-      if (!error && data) {
-        return data as T;
+      if (error) {
+        console.error(`[DatabaseSkill] Erro Supabase ao consultar ID em ${table}: ${error.message}`);
+        throw new Error(`[DatabaseSkill] Erro Supabase ao consultar ID em ${table}: ${error.message}`);
+      }
+      if (data) {
+        return toCamelCase<T>(data);
       }
     }
 

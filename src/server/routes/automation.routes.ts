@@ -1,16 +1,31 @@
-import { Router } from 'express';
-import { ResearchEngine } from '../../research/ResearchEngine.ts';
-import { DatabaseSkill } from '../../skills/database/index.ts';
-import { prepararEstruturaExecucao, executarLote, BatchExecutionSummary, DdpAuthContext } from '../../automation/realRunner.ts';
-import { TEMPLATES_NEGOCIO } from '../../automation/businessTemplates.ts';
-import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from '../../automation/schemaCatalog.ts';
-import { obterSessaoUsuario, obterStatusSessaoUsuario, simularExpiracaoSessao, iniciarSessaoPlaywright, globalAuthState } from '../../automation/auth.ts';
-import { obterEventosTrafego, limparEventosTrafego } from '../../automation/trafficMonitor.ts';
-import { extrairIdPlano } from '../../utils/planUtils.ts';
+import { Router, Express } from 'express';
+import { ResearchEngine } from '../../research/ResearchEngine';
+import { DatabaseSkill } from '../../skills/database/index';
+import {
+  prepararEstruturaExecucao,
+  executarLote,
+  executarFerramentaNoPnbox as executarFerramentaReal,
+  BatchExecutionSummary,
+  DdpAuthContext
+} from '../../automation/realRunner';
+import { executarFerramentaNoPnbox as executarFerramentaMock } from '../../automation/officialRunner';
+import { TEMPLATES_NEGOCIO } from '../../automation/businessTemplates';
+import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from '../../automation/schemaCatalog';
+import {
+  obterSessaoUsuario,
+  obterStatusSessaoUsuario,
+  removerSessaoUsuario,
+  simularExpiracaoSessao,
+  iniciarSessaoPlaywright,
+  globalAuthState
+} from '../../automation/auth';
+import { obterEventosTrafego, registrarEventoTrafego, limparEventosTrafego } from '../../automation/trafficMonitor';
+import { compararJsonComSchema, compararDoisJson } from '../../automation/schemaValidator';
+import { gerarScriptPlaywrightOficial } from '../../automation/playwrightScriptGenerator';
+import { extrairIdPlano } from '../../utils/planUtils';
 import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
-const db = new DatabaseSkill();
 
 // Catalog público de ferramentas PNBOX
 router.get('/catalog', (req, res) => {
@@ -31,21 +46,29 @@ router.get('/templates', (req, res) => {
 router.get('/auth/status', authMiddleware, (req, res) => {
   const userId = (req as any).user.id;
   const session = obterStatusSessaoUsuario(userId);
+  const isOnline = session.isOnline && session.status === 'authenticated' && !session.isExpired;
   res.json({
     status: 'ok',
-    isOnline: true,
+    isOnline,
     isExpired: session.isExpired || false,
-    session
+    modoExecucao: isOnline ? (session.modoExecucao || 'LIVE') : 'DRY_RUN',
+    session: {
+      ...session,
+      isOnline,
+      modoExecucao: isOnline ? (session.modoExecucao || 'LIVE') : 'DRY_RUN'
+    }
   });
 });
 
-// Marca sessão como expirada (teste de reconexão)
+// Encerra sessão do usuário
 router.post('/auth/expire', authMiddleware, (req, res) => {
-  const result = simularExpiracaoSessao();
+  const userId = (req as any).user.id;
+  removerSessaoUsuario(userId);
+  const session = obterStatusSessaoUsuario(userId);
   res.json({
     status: 'ok',
-    mensagem: 'Sessão marcada como expirada para fins de teste de reconexão.',
-    session: result
+    mensagem: 'Sessão PNBOX encerrada.',
+    session
   });
 });
 
@@ -88,6 +111,61 @@ router.post('/auth/login', authMiddleware, async (req, res) => {
   });
 });
 
+// Execução de Preenchimento Individual de Ferramenta
+router.post('/fill-tool', authMiddleware, async (req, res) => {
+  const userId = (req as any).user.id;
+  const { ferramentaId, registros, idPlano, modoExecucao } = req.body || {};
+  const plano = idPlano || ID_PLANO_PADRAO;
+  const modo = modoExecucao || globalAuthState.modoExecucao || 'DRY_RUN';
+
+  try {
+    let stepResult;
+    if (modo === 'LIVE') {
+      const sessao = obterSessaoUsuario(userId);
+      if (!sessao) {
+        return res.status(401).json({
+          status: 'error',
+          mensagem: 'Modo LIVE solicitado mas não há sessão autenticada. Faça login primeiro.'
+        });
+      }
+      stepResult = await executarFerramentaReal(
+        ferramentaId,
+        Array.isArray(registros) ? registros : [registros],
+        plano,
+        {
+          cookies: sessao.cookiesPnbox,
+          loginToken: sessao.idToken,
+          userId: sessao.meteorUserId
+        }
+      );
+    } else {
+      stepResult = await executarFerramentaMock(
+        ferramentaId,
+        Array.isArray(registros) ? registros : [registros],
+        plano
+      );
+    }
+
+    res.json({
+      status: 'ok',
+      modoExecucao: modo,
+      resultado: stepResult
+    });
+  } catch (err: any) {
+    res.status(500).json({ status: 'error', mensagem: err.message });
+  }
+});
+
+// Exportação do script Playwright oficial
+router.get('/script-playwright', (req, res) => {
+  const { templateId, idPlano } = req.query;
+  const script = gerarScriptPlaywrightOficial(
+    templateId ? String(templateId) : undefined,
+    idPlano ? String(idPlano) : undefined
+  );
+  res.json({ status: 'ok', script });
+});
+
 // Monitor de tráfego de rede (XHR/Fetch/DDP)
 router.get('/traffic', (req, res) => {
   const { tipo, apenasSalvamento, ferramentaId } = req.query;
@@ -105,119 +183,80 @@ router.post('/traffic/clear', (req, res) => {
   res.json({ status: 'ok', mensagem: 'Histórico de tráfego limpo com sucesso.' });
 });
 
-// 10.1 IA Deep Research V2 - Research Engine Agentic com Evidence Store
-router.post('/deep-research-v2', async (req, res) => {
-  const {
-    prompt,
-    cidadeUf,
-    orcamentoEstimado,
-    publicoAlvo,
-    modeloAprofundado,
-    idPlano,
-    maxIterations
-  } = req.body || {};
+// Validador e comparador de JSON com Schema
+router.post('/validate', (req, res) => {
+  const { jsonCapturado, ferramentaId, jsonEsperado } = req.body || {};
 
-  if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return res.status(400).json({
-      status: 'error',
-      mensagem: 'O prompt da ideia de negócio é obrigatório.'
-    });
+  if (jsonEsperado && typeof jsonEsperado === 'object') {
+    const diff = compararDoisJson(jsonCapturado, jsonEsperado);
+    return res.json({ status: 'ok', diff });
   }
 
-  // Validate required idPlano for research execution
-  if (!idPlano || typeof idPlano !== 'string' || idPlano.trim().length === 0) {
-    return res.status(400).json({
-      status: 'error',
-      mensagem: 'O ID do plano de negócio é obrigatório para execução da pesquisa.'
-    });
+  if (!ferramentaId) {
+    return res.status(400).json({ status: 'error', mensagem: 'É necessário informar ferramentaId ou jsonEsperado.' });
   }
 
-  try {
-    const engine = new ResearchEngine();
-    const result = await engine.execute({
-      prompt,
-      cidadeUf: cidadeUf || 'Brasil / Nacional',
-      orcamentoEstimado: Number(orcamentoEstimado) || 100000,
-      publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
-      modeloAprofundado: !!modeloAprofundado,
-      idPlano: idPlano,
-      maxIterations: maxIterations || 3,
-    });
-
-    res.json({
-      status: 'ok',
-      iterations: result.iterations,
-      durationMs: result.durationMs,
-      report: result.report
-    });
-  } catch (err: any) {
-    console.error('[API /api/ai/deep-research-v2] Erro:', err);
-    res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao executar Deep Research V2' });
-  }
+  const diff = compararJsonComSchema(jsonCapturado, String(ferramentaId));
+  res.json({ status: 'ok', diff });
 });
 
-// Contract: synthesize-plan - Integrates with research service to generate canonical business model
-router.post('/synthesize-plan', async (req, res) => {
-  const {
-    prompt,
-    cidadeUf,
-    orcamentoEstimado,
-    publicoAlvo,
-    modeloAprofundado,
-    idPlano,
-    maxIterations
-  } = req.body || {};
+// Execução Direta Sem Renderização (Simulador DDP)
+router.post('/execute-direct', (req, res) => {
+  const { ferramentaId, payload, idPlano, simulate503, simulateTimeout } = req.body || {};
+  const plano = idPlano || ID_PLANO_PADRAO;
 
-  if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return res.status(400).json({
+  if (simulate503) {
+    return res.status(503).json({
       status: 'error',
-      mensagem: 'O prompt da ideia de negócio é obrigatório.'
+      errorCode: 503,
+      mensagem: 'HTTP 503 Service Unavailable (Falha temporária de gateway Meteor DDP no Sebrae PNBOX - disparando retry com backoff exponencial)'
     });
   }
 
-  if (!idPlano || typeof idPlano !== 'string') {
-    return res.status(400).json({
+  if (simulateTimeout) {
+    return res.status(504).json({
       status: 'error',
-      mensagem: 'O ID do plano de negócio é obrigatório.'
+      errorCode: 504,
+      mensagem: 'HTTP 504 Gateway Timeout (Tempo limite de resposta do backend Sebrae excedido - disparando retry com backoff exponencial)'
     });
   }
 
-  try {
-    // First execute research to gather evidence and claims
-    const engine = new ResearchEngine();
-    const researchResult = await engine.execute({
-      prompt,
-      cidadeUf: cidadeUf || 'Brasil / Nacional',
-      orcamentoEstimado: Number(orcamentoEstimado) || 100000,
-      publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
-      modeloAprofundado: !!modeloAprofundado,
-      idPlano: idPlano,
-      maxIterations: maxIterations || 3,
-    });
-
-    // The research result already contains the synthesized canonical model in the report
-    // Extract and return the canonical business model
-    const canonicalModel = researchResult.report.canonicalModel;
-
-    res.json({
-      status: 'ok',
-      canonicalModel,
-      researchMetadata: {
-        iterations: researchResult.iterations,
-        durationMs: researchResult.durationMs,
-        evidenceCount: researchResult.report.evidence.length,
-        claimsCount: researchResult.report.claims.length,
-        sourcesCount: researchResult.report.sources.length
-      }
-    });
-  } catch (err: any) {
-    console.error('[API /api/ai/synthesize-plan] Erro:', err);
-    res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao sintetizar plano de negócio' });
+  const ferramenta = FERRAMENTAS_PNBOX.find((f) => f.id === ferramentaId);
+  if (!ferramenta) {
+    return res.status(404).json({ status: 'error', mensagem: 'Ferramenta não encontrada no catálogo.' });
   }
+
+  const validacao = compararJsonComSchema(payload, ferramenta);
+  const mockDocId = 'doc_' + Math.random().toString(36).substring(2, 11);
+  registrarEventoTrafego({
+    tipo: 'websocket_ddp',
+    metodo: 'METHOD_CALL',
+    url: `wss://pnbox.sebrae.com.br/websocket [${ferramenta.collectionName}.insert]`,
+    status: 200,
+    duracaoMs: Math.floor(Math.random() * 80) + 40,
+    payloadEnviado: {
+      msg: 'method',
+      method: `${ferramenta.collectionName}.insert`,
+      params: [{ ...payload, idPlano: plano }]
+    },
+    respostaRecebida: { msg: 'result', result: mockDocId },
+    operacaoDetectada: {
+      ferramentaId: ferramenta.id,
+      acao: 'insert',
+      collection: ferramenta.collectionName
+    }
+  });
+
+  res.json({
+    status: 'ok',
+    docId: mockDocId,
+    validacao,
+    mensagem: `Execução simulada com sucesso via DDP direto na collection ${ferramenta.collectionName}.`
+  });
 });
 
 // Contract: fill-batch - Process PNBOX form filling with real data
-router.post('/fill-batch', async (req, res) => {
+router.post('/fill-batch', authMiddleware, async (req, res) => {
   const {
     templateId,
     dados,
@@ -225,7 +264,6 @@ router.post('/fill-batch', async (req, res) => {
     idPlano
   } = req.body || {};
 
-  // Validate required fields
   if (!templateId || typeof templateId !== 'string') {
     return res.status(400).json({
       status: 'error',
@@ -240,7 +278,6 @@ router.post('/fill-batch', async (req, res) => {
     });
   }
 
-  // Validate dados field - should be a non-null object or array
   if (dados !== null && dados !== undefined && typeof dados !== 'object') {
     return res.status(400).json({
       status: 'error',
@@ -248,7 +285,6 @@ router.post('/fill-batch', async (req, res) => {
     });
   }
 
-  // Validate customData field - should be a non-null object if provided
   if (customData !== null && customData !== undefined && typeof customData !== 'object') {
     return res.status(400).json({
       status: 'error',
@@ -257,8 +293,7 @@ router.post('/fill-batch', async (req, res) => {
   }
 
   try {
-    // Get user ID from JWT token (set by authMiddleware)
-    const userId = req.user?.id;
+    const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({
         status: 'error',
@@ -266,7 +301,6 @@ router.post('/fill-batch', async (req, res) => {
       });
     }
 
-    // Find the template
     const template = TEMPLATES_NEGOCIO.find(t => t.id === templateId);
     if (!template) {
       return res.status(404).json({
@@ -275,10 +309,7 @@ router.post('/fill-batch', async (req, res) => {
       });
     }
 
-    // Get user's PNBOX session
     const sessao = obterSessaoUsuario(userId);
-    
-    // Check if we have a valid session
     if (!sessao) {
       return res.status(401).json({
         status: 'error',
@@ -286,7 +317,6 @@ router.post('/fill-batch', async (req, res) => {
       });
     }
 
-    // Check if session is expired
     if (new Date(sessao.expiraEm).getTime() <= Date.now()) {
       return res.status(401).json({
         status: 'error',
@@ -294,7 +324,6 @@ router.post('/fill-batch', async (req, res) => {
       });
     }
 
-    // Process dados and customData if provided
     let processedData = {};
     if (dados) {
       processedData = { ...processedData, ...dados };
@@ -303,23 +332,20 @@ router.post('/fill-batch', async (req, res) => {
       processedData = { ...processedData, ...customData };
     }
 
-    // Create DDP authentication context from PNBOX session
     const authContext: DdpAuthContext = {
       cookies: sessao.cookiesPnbox,
       loginToken: sessao.idToken,
-      userId: sessao.meteorUserId || userId, // Use meteorUserId if available, fallback to platform userId
+      userId: sessao.meteorUserId || userId,
       connectionId: `${userId}_pnbox_${Date.now()}`
     };
 
-    // Execute the batch with real PNBOX connection
     const result: BatchExecutionSummary = await executarLote(
       templateId,
-      processedData,
+      processedData as Record<string, Record<string, unknown>[]>,
       idPlano,
       authContext
     );
 
-    // Return the actual execution results
     res.json({
       status: 'ok',
       data: result
@@ -330,7 +356,6 @@ router.post('/fill-batch', async (req, res) => {
   }
 });
 
-export function registerAutomationRoutes(app) {
-  app.use('/api/ai', router);
+export function registerAutomationRoutes(app: Express) {
   app.use('/api/automation', router);
 }

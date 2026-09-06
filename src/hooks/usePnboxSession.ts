@@ -139,18 +139,24 @@ export function usePnboxSession(options: UsePnboxSessionOptions = {}) {
    */
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/automation/auth/status');
+      const platSession = getPlatformSession();
+      const headers: Record<string, string> = {};
+      if (platSession?.accessToken) {
+        headers['Authorization'] = `Bearer ${platSession.accessToken}`;
+      }
+
+      const res = await fetch('/api/automation/auth/status', { headers });
       if (!res.ok) return;
 
       const data = await res.json();
-      const isAuth = !!data.autenticado;
-      const isExp = !!data.expirado;
+      const isAuth = Boolean(data.isOnline && data.session?.status === 'authenticated' && !data.session?.isExpired);
+      const isExp = Boolean(data.isExpired || data.session?.isExpired);
 
       setSession(prev => ({
         ...prev,
         autenticado: isAuth,
         expirado: isExp,
-        tempoRestanteMinutos: data.tempoRestanteMinutos,
+        tempoRestanteMinutos: data.session?.tempoRestanteMinutos ?? data.tempoRestanteMinutos,
         statusConexao: isExp ? 'expirado' : isAuth ? 'online' : 'idle',
         ultimaVerificacao: new Date().toISOString()
       }));

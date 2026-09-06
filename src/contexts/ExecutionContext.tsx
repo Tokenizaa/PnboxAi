@@ -3,6 +3,7 @@ import React, {
   useContext,
   useState,
   useCallback,
+  useEffect,
   ReactNode,
 } from 'react';
 import { ExecutionStepResult, BatchExecutionSummary } from '../automation/officialRunner';
@@ -38,6 +39,48 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
     error: null,
   });
 
+  // Sincroniza o modo de execução com a sessão real do usuário no servidor ao iniciar
+  useEffect(() => {
+    let isMounted = true;
+    async function checkServerSession() {
+      try {
+        const data = await apiCall<{
+          isOnline: boolean;
+          isExpired: boolean;
+          session?: { status: string; isExpired: boolean; modoExecucao?: string };
+        }>('/api/automation/auth/status');
+
+        if (!isMounted) return;
+
+        const isRealAuth = Boolean(
+          data?.isOnline &&
+          data.session?.status === 'authenticated' &&
+          !data.session?.isExpired
+        );
+
+        setState((prev) => ({
+          ...prev,
+          mode: isRealAuth ? 'LIVE' : 'DRY_RUN',
+          sessionStatus: isRealAuth
+            ? 'authenticated'
+            : data?.isExpired || data?.session?.status === 'expired'
+            ? 'expired'
+            : 'idle',
+        }));
+      } catch {
+        // Modo seguro em caso de falha de conexão inicial
+        if (isMounted) {
+          setState((prev) => ({ ...prev, mode: 'DRY_RUN', sessionStatus: 'idle' }));
+        }
+      }
+    }
+
+    checkServerSession();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const setMode = useCallback((mode: ExecutionMode) => {
     setState((prev) => ({ ...prev, mode }));
   }, []);
@@ -53,10 +96,11 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
           modoExecucao: 'LIVE',
         }),
       });
-      setState((prev) => ({ ...prev, sessionStatus: 'authenticated' }));
+      setState((prev) => ({ ...prev, mode: 'LIVE', sessionStatus: 'authenticated' }));
     } catch (err) {
       setState((prev) => ({
         ...prev,
+        mode: 'DRY_RUN',
         sessionStatus: 'expired',
         error: err instanceof Error ? err.message : 'Falha na autenticação',
       }));

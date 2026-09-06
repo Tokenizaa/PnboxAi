@@ -125,16 +125,69 @@ export function carregarPlanosSalvos(): PlanoCriadoInfo[] {
     if (data) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Garante que os planos oficiais da conta do usuário estão presentes
-        const idsPresentes = new Set(parsed.map((p: PlanoCriadoInfo) => p.idPlano));
-        const faltando = PLANOS_EXEMPLO_INICIAIS.filter((p) => !idsPresentes.has(p.idPlano));
-        return [...faltando, ...parsed];
+        return parsed;
       }
     }
   } catch (e) {
     console.warn('Erro ao ler planos do localStorage:', e);
   }
-  return PLANOS_EXEMPLO_INICIAIS;
+  return [];
+}
+
+/**
+ * Salva a lista completa de planos sincronizados
+ */
+export function salvarPlanosSincronizados(planos: PlanoCriadoInfo[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(planos));
+  } catch (e) {
+    console.warn('Erro ao salvar planos sincronizados no localStorage:', e);
+  }
+}
+
+/**
+ * Conciliação bidirecional entre planos remotos do Sebrae PNBOX e o cache local
+ */
+export function conciliarPlanosBidirecional(
+  remotos: PlanoCriadoInfo[],
+  locais: PlanoCriadoInfo[]
+): PlanoCriadoInfo[] {
+  const mapaPorId = new Map<string, PlanoCriadoInfo>();
+
+  // 1. Registra os planos remotos do PNBOX (fonte de autoridade do Sebrae)
+  for (const r of remotos) {
+    mapaPorId.set(r.idPlano, {
+      ...r,
+      sincronizadoPnbox: true,
+      ultimaSincronizacao: new Date().toISOString()
+    });
+  }
+
+  // 2. Mescla dados enriquecidos localmente (ex: pesquisas IA, ferramentas preenchidas localmente)
+  for (const l of locais) {
+    if (mapaPorId.has(l.idPlano)) {
+      const existente = mapaPorId.get(l.idPlano)!;
+      mapaPorId.set(l.idPlano, {
+        ...existente,
+        ...l,
+        nomePlano: existente.nomePlano || l.nomePlano,
+        setor: existente.setor || l.setor,
+        sincronizadoPnbox: true,
+        dados14Ferramentas: {
+          ...(existente.dados14Ferramentas || {}),
+          ...(l.dados14Ferramentas || {})
+        },
+        pesquisaMercado: l.pesquisaMercado || existente.pesquisaMercado
+      });
+    } else {
+      // Plano criado no app que ainda precisa ser espelhado no PNBOX
+      mapaPorId.set(l.idPlano, l);
+    }
+  }
+
+  const resultado = Array.from(mapaPorId.values());
+  salvarPlanosSincronizados(resultado);
+  return resultado;
 }
 
 /**

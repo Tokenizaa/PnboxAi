@@ -16,7 +16,10 @@ import {
   BrainCircuit,
   Lightbulb,
   Share2,
-  ExternalLink
+  ExternalLink,
+  RefreshCw,
+  Cloud,
+  Check
 } from 'lucide-react';
 import { PlanoCriadoInfo, AuthSessionState } from '../../types/pnbox';
 
@@ -27,6 +30,9 @@ interface PnboxPlansViewProps {
   onOpenCriarPlanoModal: () => void;
   onOpenAiCopilot: () => void;
   onAutoFillWithAi: (idPlano: string) => void;
+  onSyncPnboxPlans?: () => void;
+  isSyncingPlans?: boolean;
+  authSession?: AuthSessionState;
   userName?: string;
 }
 
@@ -37,6 +43,9 @@ export const PnboxPlansView: React.FC<PnboxPlansViewProps> = ({
   onOpenCriarPlanoModal,
   onOpenAiCopilot,
   onAutoFillWithAi,
+  onSyncPnboxPlans,
+  isSyncingPlans = false,
+  authSession,
   userName = 'OSVALDO LESSA FARIAS NETTO'
 }) => {
   // Ícone contextual para cada plano
@@ -69,13 +78,38 @@ export const PnboxPlansView: React.FC<PnboxPlansViewProps> = ({
             <p className="text-sm sm:text-base text-indigo-200/90 mt-1 font-normal">
               Tenha visibilidade do seu negócio com o seu plano
             </p>
+            <div className="flex items-center gap-2 mt-2">
+              {authSession?.isOnline ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Conectado ao PNBOX Sebrae • Sincronização Bidirecional Ativa</span>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-amber-500/10 border border-amber-500/30 text-amber-300 font-medium">
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>Modo Local • Conecte na aba "Sessão" para carregar seus projetos oficiais do Sebrae</span>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Banner de Ação Rápida de IA */}
-          <div className="flex items-center gap-3">
+          {/* Banner de Ação Rápida de IA e Sincronização */}
+          <div className="flex flex-wrap items-center gap-3">
+            {onSyncPnboxPlans && (
+              <button
+                onClick={onSyncPnboxPlans}
+                disabled={isSyncingPlans}
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-sm font-semibold transition-all hover:scale-105 active:scale-95 disabled:opacity-50 text-white cursor-pointer"
+                title="Sincronizar projetos diretamente com a plataforma Sebrae PNBOX"
+              >
+                <RefreshCw className={`w-4 h-4 text-indigo-300 ${isSyncingPlans ? 'animate-spin' : ''}`} />
+                <span>{isSyncingPlans ? 'Sincronizando...' : 'Sincronizar com PNBOX'}</span>
+              </button>
+            )}
+
             <button
               onClick={onOpenCriarPlanoModal}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-full text-sm font-semibold shadow-lg shadow-pink-600/30 transition-all hover:scale-105 active:scale-95"
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-full text-sm font-semibold shadow-lg shadow-pink-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-pink-200" />
               <span>Criar Novo Plano com IA</span>
@@ -89,96 +123,146 @@ export const PnboxPlansView: React.FC<PnboxPlansViewProps> = ({
             <h2 className="text-xl font-bold text-white tracking-tight">
               Seus planos
             </h2>
-            <span className="text-xs text-indigo-300">
-              {planos.length} planos cadastrados
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-indigo-300">
+                {planos.length} plano(s) cadastrado(s)
+              </span>
+            </div>
           </div>
 
-          {/* Grid de Cards de Planos (Estilo Oficial PNBOX) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {planos.map((plano) => {
-              const isActive = plano.idPlano === planoAtivoId;
-              const isFilled = (plano.ferramentasPreenchidas || 0) >= 10;
-
-              return (
-                <div
-                  key={plano.idPlano}
-                  className="group relative bg-[#1877f2] hover:bg-[#166fe5] rounded-xl overflow-hidden shadow-lg border border-[#3b8ef7]/40 transition-all duration-200 flex flex-col justify-between cursor-pointer"
-                  onClick={() => onSelectPlano(plano.idPlano)}
+          {planos.length === 0 ? (
+            <div className="bg-[#125ec2]/20 border border-[#3b8ef7]/30 rounded-2xl p-10 text-center flex flex-col items-center justify-center">
+              <div className="w-16 h-16 rounded-full bg-[#1877f2]/20 flex items-center justify-center text-indigo-300 mb-4">
+                <FolderOpen className="w-8 h-8" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Nenhum projeto carregado ainda</h3>
+              <p className="text-sm text-indigo-200/80 max-w-md mb-6">
+                Conecte sua conta do Sebrae para importar automaticamente seus projetos existentes no PNBOX ou crie um novo plano com auxílio de IA.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-4">
+                {onSyncPnboxPlans && (
+                  <button
+                    onClick={onSyncPnboxPlans}
+                    disabled={isSyncingPlans}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-[#1877f2] hover:bg-[#166fe5] text-white rounded-full text-sm font-semibold shadow-md transition-all cursor-pointer"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSyncingPlans ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingPlans ? 'Buscando do PNBOX...' : 'Sincronizar Projetos do Sebrae'}</span>
+                  </button>
+                )}
+                <button
+                  onClick={onOpenCriarPlanoModal}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 text-white rounded-full text-sm font-semibold shadow-md transition-all cursor-pointer"
                 >
-                  {/* Topo do Card com Checkmark e Ações */}
-                  <div className="p-5 flex flex-col items-center text-center">
-                    {/* Badge de status (concluído / ativo) */}
-                    <div className="w-full flex items-center justify-between text-xs text-white/80 mb-2">
-                      <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-mono">
-                        {plano.idPlano.slice(0, 8)}...
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        {isFilled && (
-                          <div className="w-5 h-5 rounded-full bg-emerald-400 text-white flex items-center justify-center shadow-sm" title="Plano preenchido">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          </div>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onAutoFillWithAi(plano.idPlano);
-                          }}
-                          className="p-1 rounded hover:bg-white/20 text-white/90"
-                          title="Menu do plano"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                  <Sparkles className="w-4 h-4 text-pink-200" />
+                  <span>Criar Novo Plano</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Grid de Cards de Planos (Estilo Oficial PNBOX) */
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {planos.map((plano) => {
+                const isActive = plano.idPlano === planoAtivoId;
+                const isFilled = (plano.ferramentasPreenchidas || 0) >= 10;
+                const isSynced = Boolean(plano.sincronizadoPnbox);
+
+                return (
+                  <div
+                    key={plano.idPlano}
+                    className={`group relative bg-[#1877f2] hover:bg-[#166fe5] rounded-xl overflow-hidden shadow-lg border ${
+                      isActive ? 'border-amber-400 ring-2 ring-amber-400/40' : 'border-[#3b8ef7]/40'
+                    } transition-all duration-200 flex flex-col justify-between cursor-pointer`}
+                    onClick={() => onSelectPlano(plano.idPlano)}
+                  >
+                    {/* Topo do Card com Checkmark e Ações */}
+                    <div className="p-5 flex flex-col items-center text-center">
+                      {/* Badge de status (concluído / ativo / sincronizado) */}
+                      <div className="w-full flex items-center justify-between text-xs text-white/80 mb-2">
+                        <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-mono">
+                          {plano.idPlano.slice(0, 8)}...
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {isSynced && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-400/20 text-emerald-200 border border-emerald-400/30 font-medium" title="Sincronizado no Sebrae PNBOX">
+                              PNBOX ✓
+                            </span>
+                          )}
+                          {isFilled && (
+                            <div className="w-5 h-5 rounded-full bg-emerald-400 text-white flex items-center justify-center shadow-sm" title="Plano preenchido">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onAutoFillWithAi(plano.idPlano);
+                            }}
+                            className="p-1 rounded hover:bg-white/20 text-white/90"
+                            title="Menu do plano"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Círculo com Ícone em Fundo Branco (Identidade Visual PNBOX) */}
+                      <div className="w-20 h-20 rounded-full bg-white flex items-center justify-center shadow-md my-3 group-hover:scale-105 transition-transform duration-200">
+                        {getIconePlano(plano.nomePlano)}
+                      </div>
+
+                      {/* Nome do Plano */}
+                      <h3 className="text-lg font-bold text-white leading-snug line-clamp-2 mt-1 min-h-[3rem]">
+                        {plano.nomePlano}
+                      </h3>
                     </div>
 
-                    {/* Círculo com Ícone em Fundo Branco (Identidade Visual PNBOX) */}
-                    <div className="w-20 h-20 rounded-full bg-white flex items-center justify-center shadow-md my-3 group-hover:scale-105 transition-transform duration-200">
-                      {getIconePlano(plano.nomePlano)}
+                    {/* Barra Inferior com Categoria/Objetivo */}
+                    <div className="bg-[#125ec2] px-4 py-3 flex items-center justify-between text-xs text-white/95 border-t border-[#3b8ef7]/30">
+                      <span className="truncate font-medium">
+                        {plano.categoriaObjetivo || 'Criar um novo negócio'}
+                      </span>
+                      <a
+                        href={`https://pnbox.sebrae.com.br/planoNegocio/ferramentas/${plano.idPlano}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1 hover:bg-white/20 rounded transition-colors"
+                        title="Abrir diretamente no Sebrae PNBOX oficial"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-white/80 hover:text-white" />
+                      </a>
                     </div>
 
-                    {/* Nome do Plano */}
-                    <h3 className="text-lg font-bold text-white leading-snug line-clamp-2 mt-1 min-h-[3rem]">
-                      {plano.nomePlano}
-                    </h3>
-                  </div>
+                    {/* Camada Hover com Botões de Ação Direta */}
+                    <div className="absolute inset-0 bg-[#0c4ca5]/95 backdrop-blur-xs opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center gap-2.5 p-4 z-10">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectPlano(plano.idPlano);
+                        }}
+                        className="w-full py-2 px-3 bg-white text-[#1877f2] hover:bg-slate-100 rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                        <span>Abrir Ferramentas (14)</span>
+                      </button>
 
-                  {/* Barra Inferior com Categoria/Objetivo */}
-                  <div className="bg-[#125ec2] px-4 py-3 flex items-center justify-between text-xs text-white/95 border-t border-[#3b8ef7]/30">
-                    <span className="truncate font-medium">
-                      {plano.categoriaObjetivo || 'Criar um novo negócio'}
-                    </span>
-                    <ArrowRight className="w-4 h-4 opacity-75 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAutoFillWithAi(plano.idPlano);
+                        }}
+                        className="w-full py-2 px-3 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Sparkles className="w-4 h-4 text-pink-200" />
+                        <span>Preencher com IA</span>
+                      </button>
+                    </div>
                   </div>
-
-                  {/* Camada Hover com Botões de Ação Direta */}
-                  <div className="absolute inset-0 bg-[#0c4ca5]/95 backdrop-blur-xs opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-center items-center gap-2.5 p-4 z-10">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectPlano(plano.idPlano);
-                      }}
-                      className="w-full py-2 px-3 bg-white text-[#1877f2] hover:bg-slate-100 rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-2"
-                    >
-                      <FolderOpen className="w-4 h-4" />
-                      <span>Abrir Ferramentas (14)</span>
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAutoFillWithAi(plano.idPlano);
-                      }}
-                      className="w-full py-2 px-3 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center justify-center gap-2"
-                    >
-                      <Sparkles className="w-4 h-4 text-pink-200" />
-                      <span>Preencher com IA</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* 3. Seção "Para você" (Conteúdos e Recomendações) */}

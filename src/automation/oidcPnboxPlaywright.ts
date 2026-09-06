@@ -299,6 +299,162 @@ if (!meteorData.loginToken || !meteorData.userId) {
 
     console.log(`[OIDC/Playwright] Meteor tokens capturados com sucesso: userId=${meteorData.userId}`);
 
+    // ETAPA 6.5: Extrair planos reais da conta do PNBOX direto da página ativa
+    let planosPnbox: any[] = [];
+    try {
+      // Esperar brevemente caso haja subscrição de planos carregando
+      await page.waitForTimeout(2000);
+      planosPnbox = await page.evaluate(async () => {
+        const planos: any[] = [];
+        const w = window as any;
+
+        // 1. Coleções Mongo no Meteor do PNBOX
+        try {
+          const colNames = ['planoNegocio', 'planos', 'planosNegocio', 'plano'];
+          for (const cn of colNames) {
+            const col = w.Mongo?.Collection?.get(cn);
+            if (col && typeof col.find === 'function') {
+              const items = col.find().fetch();
+              if (Array.isArray(items) && items.length > 0) {
+                items.forEach((it: any) => {
+                  const id = String(it._id || it.id);
+                  if (!planos.some(p => p.idPlano === id)) {
+                    planos.push({
+                      idPlano: id,
+                      nomePlano: String(it.nome || it.nomePlano || it.titulo || 'Plano Sem Título'),
+                      setor: String(it.setor || it.ramoAtividade || 'Geral'),
+                      descricao: String(it.descricao || it.apresentacao || ''),
+                      cidadeUf: String(it.cidade || it.cidadeUf || it.municipio || 'Brasil'),
+                      criadoEm: it.createdAt ? new Date(it.createdAt).toISOString() : new Date().toISOString(),
+                      status: 'criado_pnbox_ddp',
+                      metodoCriacao: 'ddp_direct',
+                      ferramentasPreenchidas: typeof it.ferramentasPreenchidas === 'number' ? it.ferramentasPreenchidas : 0,
+                      categoriaObjetivo: it.categoriaObjetivo || 'Criar um novo negócio',
+                      sincronizadoPnbox: true,
+                      ultimaSincronizacao: new Date().toISOString()
+                    });
+                  }
+                });
+              }
+            }
+          }
+        } catch (e) {}
+
+        // 2. Stores do Meteor Connection
+        try {
+          if (planos.length === 0 && w.Meteor?.connection?._stores) {
+            const stores = w.Meteor.connection._stores;
+            for (const key of Object.keys(stores)) {
+              if (key.toLowerCase().includes('plano')) {
+                const store = stores[key];
+                if (store && typeof store._getCollection === 'function') {
+                  const items = store._getCollection().find().fetch();
+                  if (Array.isArray(items) && items.length > 0) {
+                    items.forEach((it: any) => {
+                      const id = String(it._id || it.id);
+                      if (!planos.some(p => p.idPlano === id)) {
+                        planos.push({
+                          idPlano: id,
+                          nomePlano: String(it.nome || it.nomePlano || it.titulo || 'Plano Sem Título'),
+                          setor: String(it.setor || it.ramoAtividade || 'Geral'),
+                          descricao: String(it.descricao || it.apresentacao || ''),
+                          cidadeUf: String(it.cidade || it.cidadeUf || it.municipio || 'Brasil'),
+                          criadoEm: it.createdAt ? new Date(it.createdAt).toISOString() : new Date().toISOString(),
+                          status: 'criado_pnbox_ddp',
+                          metodoCriacao: 'ddp_direct',
+                          ferramentasPreenchidas: typeof it.ferramentasPreenchidas === 'number' ? it.ferramentasPreenchidas : 0,
+                          categoriaObjetivo: it.categoriaObjetivo || 'Criar um novo negócio',
+                          sincronizadoPnbox: true,
+                          ultimaSincronizacao: new Date().toISOString()
+                        });
+                      }
+                    });
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {}
+
+        // 3. Meteor.call para métodos de listagem
+        if (planos.length === 0 && w.Meteor?.call) {
+          const methodNames = ['planoNegocio.meusPlanos', 'planos.meusPlanos', 'planoNegocio.listar', 'planos.listar'];
+          for (const m of methodNames) {
+            try {
+              const res: any = await new Promise((resolve) => {
+                const timer = setTimeout(() => resolve(null), 3000);
+                w.Meteor.call(m, (err: any, r: any) => {
+                  clearTimeout(timer);
+                  if (!err && r) resolve(r);
+                  else resolve(null);
+                });
+              });
+              if (Array.isArray(res) && res.length > 0) {
+                res.forEach((it: any) => {
+                  const id = String(it._id || it.id);
+                  if (!planos.some(p => p.idPlano === id)) {
+                    planos.push({
+                      idPlano: id,
+                      nomePlano: String(it.nome || it.nomePlano || it.titulo || 'Plano Sem Título'),
+                      setor: String(it.setor || it.ramoAtividade || 'Geral'),
+                      descricao: String(it.descricao || it.apresentacao || ''),
+                      cidadeUf: String(it.cidade || it.cidadeUf || it.municipio || 'Brasil'),
+                      criadoEm: it.createdAt ? new Date(it.createdAt).toISOString() : new Date().toISOString(),
+                      status: 'criado_pnbox_ddp',
+                      metodoCriacao: 'ddp_direct',
+                      ferramentasPreenchidas: typeof it.ferramentasPreenchidas === 'number' ? it.ferramentasPreenchidas : 0,
+                      categoriaObjetivo: it.categoriaObjetivo || 'Criar um novo negócio',
+                      sincronizadoPnbox: true,
+                      ultimaSincronizacao: new Date().toISOString()
+                    });
+                  }
+                });
+                break;
+              }
+            } catch (e) {}
+          }
+        }
+
+        // 4. Links e elementos no DOM
+        if (planos.length === 0) {
+          const links = Array.from(document.querySelectorAll('a[href*="/ferramentas/"], a[href*="/planoNegocio/"]'));
+          const seenIds = new Set<string>();
+          for (const link of links) {
+            const href = link.getAttribute('href') || '';
+            const match = href.match(/(?:planoNegocio\/ferramentas|ferramentas|planoNegocio)\/([a-zA-Z0-9_-]+)/);
+            if (match && match[1] && match[1] !== 'ferramentas' && !seenIds.has(match[1])) {
+              seenIds.add(match[1]);
+              const id = match[1];
+              const card = link.closest('div[class*="card"], div[class*="border"], div[class*="item"]') || link;
+              const textContent = (card.textContent || link.textContent || '').trim();
+              const lines = textContent.split('\n').map(s => s.trim()).filter(Boolean);
+              const nome = lines[0] && lines[0].length > 2 ? lines[0] : `Plano ${id.substring(0, 8)}`;
+              const setor = lines[1] && lines[1] !== nome ? lines[1] : 'Geral';
+              planos.push({
+                idPlano: id,
+                nomePlano: nome,
+                setor,
+                descricao: `Plano Sebrae PNBOX (${id})`,
+                cidadeUf: 'Brasil',
+                criadoEm: new Date().toISOString(),
+                status: 'criado_pnbox_ddp',
+                metodoCriacao: 'ddp_direct',
+                ferramentasPreenchidas: 0,
+                categoriaObjetivo: 'Criar um novo negócio',
+                sincronizadoPnbox: true,
+                ultimaSincronizacao: new Date().toISOString()
+              });
+            }
+          }
+        }
+
+        return planos;
+      });
+      console.log(`[OIDC/Playwright] ${planosPnbox.length} plano(s) real(is) detectado(s) na conta do PNBOX`);
+    } catch (err: any) {
+      console.warn('[OIDC/Playwright] Detecção de planos da página:', err.message);
+    }
+
     // ETAPA 7: Extrair cookies do PNBOX para completar autenticação WebSocket
     const allCookies = await context.cookies();
     const pnboxCookies = allCookies.filter(c =>
@@ -326,7 +482,8 @@ if (!meteorData.loginToken || !meteorData.userId) {
       expiresAt: expiresAtMs,
       // Campos extras para o realRunner usar diretamente
       meteorLoginToken: meteorData.loginToken,
-      meteorUserId: meteorData.userId
+      meteorUserId: meteorData.userId,
+      planosPnbox
     } as any;
 } finally {
      // SEMPRE fechar o navegador — é a fonte do risco de segurança
