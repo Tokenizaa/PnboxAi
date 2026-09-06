@@ -1,4 +1,4 @@
-import { FERRAMENTAS_PNBOX, ID_PLANO_PADRAO } from "../../automation/schemaCatalog";
+import { FERRAMENTAS_PNBOX } from "../../automation/schemaCatalog";
 import { FerramentaInfo } from "../../types/pnbox";
 import { CanonicalBusinessModel } from "../types";
 import { compararJsonComSchema } from "../../automation/schemaValidator";
@@ -6,6 +6,7 @@ import { compararJsonComSchema } from "../../automation/schemaValidator";
 export interface AdapterOptions {
   idPlano?: string;
   skipValidation?: boolean;
+  /** Mantido por compatibilidade de API; não habilita dados de exemplo. */
   strictMode?: boolean;
 }
 
@@ -37,16 +38,17 @@ export interface AdapterResult {
 export class PnboxAdapter {
   private idPlano: string;
 
-  constructor(idPlano: string = ID_PLANO_PADRAO) {
+  constructor(idPlano = "") {
     this.idPlano = idPlano;
   }
 
   adapt(canonical: CanonicalBusinessModel, options: AdapterOptions = {}): AdapterResult {
-    const idPlano = options.idPlano || this.idPlano;
-    const strictMode = options.strictMode ?? true;
+    const idPlano = (options.idPlano || this.idPlano).trim();
+    if (!idPlano || idPlano === ":idPlano" || idPlano.startsWith("plano_")) {
+      throw new Error("PNBOX_REAL_PLAN_REQUIRED: o adapter exige o ID real retornado pelo PNBOX.");
+    }
 
     const collections: Record<string, Record<string, unknown>[]> = {};
-
     const mappers: Record<string, (model: CanonicalBusinessModel) => Record<string, unknown>[]> = {
       segmentacaoMercado: (m) => this.mapSegmentacaoMercado(m, idPlano),
       geradorPersonas: (m) => this.mapGeradorPersonas(m, idPlano),
@@ -68,17 +70,13 @@ export class PnboxAdapter {
 
     for (const ferramenta of FERRAMENTAS_PNBOX) {
       const mapper = mappers[ferramenta.collectionName];
-      if (mapper) {
-        try {
-          const items = mapper(canonical);
-          collections[ferramenta.collectionName] = items;
-        } catch (error) {
-          if (strictMode) {
-            collections[ferramenta.collectionName] = [];
-          } else {
-            collections[ferramenta.collectionName] = [ferramenta.exemploPayload];
-          }
-        }
+      if (!mapper) continue;
+
+      try {
+        collections[ferramenta.collectionName] = mapper(canonical);
+      } catch (error) {
+        // Falha de mapeamento nunca vira dado fictício. A coleção fica vazia e a validação registra o problema.
+        collections[ferramenta.collectionName] = [];
       }
     }
 
@@ -120,167 +118,75 @@ export class PnboxAdapter {
 
   private mapGeradorPersonas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.customer.personas.length === 0) return [];
-    return m.customer.personas.map((p) => ({
-      idPlano,
-      nome: p.name,
-      idade: p.age,
-      profissao: p.profession,
-      escolaridade: p.education,
-      renda: p.income,
-      habitos: p.habits,
-      dores: p.painPoints.join("; "),
-      objetivos: p.goals.join("; "),
-    }));
+    return m.customer.personas.map((p) => ({ idPlano, nome: p.name, idade: p.age, profissao: p.profession, escolaridade: p.education, renda: p.income, habitos: p.habits, dores: p.painPoints.join("; "), objetivos: p.goals.join("; ") }));
   }
 
   private mapJornadaCliente(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.customer.journey.length === 0) return [];
-    return m.customer.journey.map((j) => ({
-      idPlano,
-      etapa: j.stage,
-      acoes: j.actions,
-      pontosContato: j.touchpoints.join("; "),
-      emocoes: j.emotions,
-      oportunidadesMelhoria: j.opportunities.join("; "),
-    }));
+    return m.customer.journey.map((j) => ({ idPlano, etapa: j.stage, acoes: j.actions, pontosContato: j.touchpoints.join("; "), emocoes: j.emotions, oportunidadesMelhoria: j.opportunities.join("; ") }));
   }
 
   private mapPropostaValor(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const vp = m.valueProposition;
-    return [{
-      idPlano,
-      tarefasCliente: vp.customerJobs.join("; "),
-      dores: vp.pains.join("; "),
-      ganhos: vp.gains.join("; "),
-      produtosServicos: vp.productsServices.join("; "),
-      aliviadoresDores: vp.painRelievers.join("; "),
-      criadoresGanhos: vp.gainCreators.join("; "),
-    }];
+    return [{ idPlano, tarefasCliente: vp.customerJobs.join("; "), dores: vp.pains.join("; "), ganhos: vp.gains.join("; "), produtosServicos: vp.productsServices.join("; "), aliviadoresDores: vp.painRelievers.join("; "), criadoresGanhos: vp.gainCreators.join("; ") }];
   }
 
   private mapAnaliseConcorrencia(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.competition.competitors.length === 0) return [];
-    return m.competition.competitors.map((c) => ({
-      idPlano,
-      nomeConcorrente: c.name,
-      pontosFortes: c.strengths.join("; "),
-      pontosFracos: c.weaknesses.join("; "),
-      preco: c.pricing,
-      diferencial: c.differentiators.join("; "),
-    }));
+    return m.competition.competitors.map((c) => ({ idPlano, nomeConcorrente: c.name, pontosFortes: c.strengths.join("; "), pontosFracos: c.weaknesses.join("; "), preco: c.pricing, diferencial: c.differentiators.join("; ") }));
   }
 
   private mapForcasFraquezas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    const items = [
-      ...m.swot.strengths.map((s) => ({ tipo: "forca", descricao: s.description })),
-      ...m.swot.weaknesses.map((w) => ({ tipo: "fraqueza", descricao: w.description })),
-    ];
-    return items.map((item) => ({
-      idPlano,
-      tipo: item.tipo,
-      descricao: item.descricao,
-      grauImportancia: "Média",
-    }));
+    const items = [...m.swot.strengths.map((s) => ({ tipo: "forca", descricao: s.description })), ...m.swot.weaknesses.map((w) => ({ tipo: "fraqueza", descricao: w.description }))];
+    return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao, grauImportancia: "Média" }));
   }
 
   private mapOportunidadesAmeacas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    const items = [
-      ...m.swot.opportunities.map((o) => ({ tipo: "oportunidade", descricao: o.description })),
-      ...m.swot.threats.map((t) => ({ tipo: "ameaca", descricao: t.description })),
-    ];
-    return items.map((item) => ({
-      idPlano,
-      tipo: item.tipo,
-      descricao: item.descricao,
-      impacto: "Médio",
-    }));
+    const items = [...m.swot.opportunities.map((o) => ({ tipo: "oportunidade", descricao: o.description })), ...m.swot.threats.map((t) => ({ tipo: "ameaca", descricao: t.description }))];
+    return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao, impacto: "Médio" }));
   }
 
   private mapAnaliseSwot(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const s = m.swot.strategies;
-    return [{
-      idPlano,
-      estrategiaDesenvolvimento: s.development,
-      estrategiaManutencao: s.maintenance,
-      estrategiaSobrevivencia: s.survival,
-    }];
+    return [{ idPlano, estrategiaDesenvolvimento: s.development, estrategiaManutencao: s.maintenance, estrategiaSobrevivencia: s.survival }];
   }
 
   private mapInvestimentoFixo(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.financials.investment.fixed.map((item) => ({
-      idPlano,
-      descricao: item.item,
-      quantidade: item.quantity,
-      valorUnitario: item.unitCost,
-      subtotal: item.total,
-    }));
+    return m.financials.investment.fixed.map((item) => ({ idPlano, descricao: item.item, quantidade: item.quantity, valorUnitario: item.unitCost, subtotal: item.total }));
   }
 
   private mapInvestimentoPreOperacional(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.financials.investment.preOperational.map((item) => ({
-      idPlano,
-      descricao: item.item,
-      valor: item.total,
-    }));
+    return m.financials.investment.preOperational.map((item) => ({ idPlano, descricao: item.item, valor: item.total }));
   }
 
   private mapEstoqueInicial(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.financials.investment.initialStock.map((item) => ({
-      idPlano,
-      descricao: item.item,
-      quantidade: item.quantity,
-      valorUnitario: item.unitCost,
-    }));
+    return m.financials.investment.initialStock.map((item) => ({ idPlano, descricao: item.item, quantidade: item.quantity, valorUnitario: item.unitCost }));
   }
 
   private mapCapitalGiro(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const wc = m.financials.investment.workingCapital;
     if (wc === 0) return [];
-    // prazoMedioVendas/Compras não disponíveis no modelo canônico - retornar 0 para evitar dados fictícios
-    return [{
-      idPlano,
-      prazoMedioVendas: 0,
-      prazoMedioCompras: 0,
-      reservaFinanceira: wc,
-    }];
+    return [{ idPlano, prazoMedioVendas: 0, prazoMedioCompras: 0, reservaFinanceira: wc }];
   }
 
   private mapCustoFixo(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.financials.costs.fixed.map((item) => ({
-      idPlano,
-      descricao: item.item,
-      valor: item.monthlyValue,
-    }));
+    return m.financials.costs.fixed.map((item) => ({ idPlano, descricao: item.item, valor: item.monthlyValue }));
   }
 
   private mapProdutoServico(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.financials.revenue.products.map((p) => ({
-      idPlano,
-      descricao: p.product,
-      precoVenda: p.unitPrice,
-      custoUnitario: p.unitCost,
-      estimativaVendasMes: p.estimatedQuantity,
-    }));
+    return m.financials.revenue.products.map((p) => ({ idPlano, descricao: p.product, precoVenda: p.unitPrice, custoUnitario: p.unitCost, estimativaVendasMes: p.estimatedQuantity }));
   }
 
   private mapQuadroExperimentacao(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    // Sem dados reais de hipóteses no modelo canônico - retornar array vazio
     return [];
   }
 
   private mapFunilVendas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.marketing.channels.map((ch) => ({
-      idPlano,
-      nome: ch.name,
-      orcamento: ch.monthlyInvestment,
-      // qtdPessoasAlcancadas/Chamadas são estimativas - retornar 0 para evitar dados fictícios
-      qtdPessoasAlcancadas: 0,
-      qtdPessoasChamadas: 0,
-    }));
+    return m.marketing.channels.map((ch) => ({ idPlano, nome: ch.name, orcamento: ch.monthlyInvestment, qtdPessoasAlcancadas: 0, qtdPessoasChamadas: 0 }));
   }
 
   private validate(collections: Record<string, Record<string, unknown>[]>): AdapterResult["validation"] {
-    const detailsByCollection: NonNullable<AdapterResult["validation"]["detailsByCollection"]> = {};
+    const detailsByCollection: AdapterResult["validation"]["detailsByCollection"] = {};
     const detailsByTool: AdapterResult["validation"]["detailsByTool"] = {};
     let totalErrors = 0;
     let totalWarnings = 0;
@@ -305,7 +211,6 @@ export class PnboxAdapter {
       }
 
       const status = errors.length === 0 ? (items.length === 0 ? "missing" : "valid") : "error";
-
       detailsByCollection[ferramenta.collectionName] = {
         ferramentaId: ferramenta.id,
         collectionName: ferramenta.collectionName,
@@ -314,24 +219,10 @@ export class PnboxAdapter {
         errors,
         warnings,
       };
-
-      detailsByTool[ferramenta.id] = {
-        ferramentaId: ferramenta.id,
-        collectionName: ferramenta.collectionName,
-        status,
-        itemsValidated: items.length,
-        errors,
-        warnings,
-      };
+      detailsByTool[ferramenta.id] = { ...detailsByCollection[ferramenta.collectionName] };
     }
 
-    return {
-      valid: totalErrors === 0,
-      totalErrors,
-      totalWarnings,
-      detailsByTool,
-      detailsByCollection,
-    };
+    return { valid: totalErrors === 0, totalErrors, totalWarnings, detailsByTool, detailsByCollection };
   }
 
   static getToolByCollection(collectionName: string): FerramentaInfo | undefined {
