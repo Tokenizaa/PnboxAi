@@ -6,7 +6,7 @@ import { compararJsonComSchema } from "../../automation/schemaValidator";
 export interface AdapterOptions {
   idPlano?: string;
   skipValidation?: boolean;
-  /** Mantido por compatibilidade de API; não habilita dados de exemplo. */
+  /** Mantido por compatibilidade; nunca habilita dados de exemplo. */
   strictMode?: boolean;
 }
 
@@ -16,22 +16,8 @@ export interface AdapterResult {
     valid: boolean;
     totalErrors: number;
     totalWarnings: number;
-    detailsByCollection: Record<string, {
-      ferramentaId: string;
-      collectionName: string;
-      status: "valid" | "error" | "missing";
-      itemsValidated: number;
-      errors: string[];
-      warnings: string[];
-    }>;
-    detailsByTool: Record<string, {
-      ferramentaId: string;
-      collectionName: string;
-      status: "valid" | "error" | "missing";
-      itemsValidated: number;
-      errors: string[];
-      warnings: string[];
-    }>;
+    detailsByCollection: Record<string, { ferramentaId: string; collectionName: string; status: "valid" | "error" | "missing"; itemsValidated: number; errors: string[]; warnings: string[] }>;
+    detailsByTool: Record<string, { ferramentaId: string; collectionName: string; status: "valid" | "error" | "missing"; itemsValidated: number; errors: string[]; warnings: string[] }>;
   };
 }
 
@@ -71,49 +57,24 @@ export class PnboxAdapter {
     for (const ferramenta of FERRAMENTAS_PNBOX) {
       const mapper = mappers[ferramenta.collectionName];
       if (!mapper) continue;
-
       try {
         collections[ferramenta.collectionName] = mapper(canonical);
-      } catch (error) {
-        // Falha de mapeamento nunca vira dado fictício. A coleção fica vazia e a validação registra o problema.
+      } catch {
         collections[ferramenta.collectionName] = [];
       }
     }
 
     if (options.skipValidation) {
-      return {
-        collections,
-        validation: {
-          valid: true,
-          totalErrors: 0,
-          totalWarnings: 0,
-          detailsByCollection: {},
-          detailsByTool: {},
-        },
-      };
+      return { collections, validation: { valid: true, totalErrors: 0, totalWarnings: 0, detailsByCollection: {}, detailsByTool: {} } };
     }
 
     const validation = this.validate(collections);
-    return {
-      collections,
-      validation: {
-        ...validation,
-        detailsByTool: validation.detailsByCollection,
-      },
-    };
+    return { collections, validation: { ...validation, detailsByTool: validation.detailsByCollection } };
   }
 
   private mapSegmentacaoMercado(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     if (m.customer.segments.length === 0) return [];
-    return m.customer.segments.map((seg) => ({
-      idPlano,
-      descricao: seg.name,
-      variavel1: seg.demographics.ageRange || "A definir",
-      variavel1Oposto: "Outros",
-      variavel2: seg.behaviors[0] || "A definir",
-      variavel2Oposto: "Comportamento oposto",
-      segmento: seg.description.substring(0, 200),
-    }));
+    return m.customer.segments.map((seg) => ({ idPlano, descricao: seg.name, variavel1: seg.demographics.ageRange, variavel1Oposto: undefined, variavel2: seg.behaviors[0], variavel2Oposto: undefined, segmento: seg.description.substring(0, 200) }));
   }
 
   private mapGeradorPersonas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
@@ -138,12 +99,12 @@ export class PnboxAdapter {
 
   private mapForcasFraquezas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const items = [...m.swot.strengths.map((s) => ({ tipo: "forca", descricao: s.description })), ...m.swot.weaknesses.map((w) => ({ tipo: "fraqueza", descricao: w.description }))];
-    return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao, grauImportancia: "Média" }));
+    return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao }));
   }
 
   private mapOportunidadesAmeacas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const items = [...m.swot.opportunities.map((o) => ({ tipo: "oportunidade", descricao: o.description })), ...m.swot.threats.map((t) => ({ tipo: "ameaca", descricao: t.description }))];
-    return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao, impacto: "Médio" }));
+    return items.map((item) => ({ idPlano, tipo: item.tipo, descricao: item.descricao }));
   }
 
   private mapAnaliseSwot(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
@@ -166,7 +127,7 @@ export class PnboxAdapter {
   private mapCapitalGiro(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
     const wc = m.financials.investment.workingCapital;
     if (wc === 0) return [];
-    return [{ idPlano, prazoMedioVendas: 0, prazoMedioCompras: 0, reservaFinanceira: wc }];
+    return [{ idPlano, reservaFinanceira: wc }];
   }
 
   private mapCustoFixo(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
@@ -177,12 +138,12 @@ export class PnboxAdapter {
     return m.financials.revenue.products.map((p) => ({ idPlano, descricao: p.product, precoVenda: p.unitPrice, custoUnitario: p.unitCost, estimativaVendasMes: p.estimatedQuantity }));
   }
 
-  private mapQuadroExperimentacao(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
+  private mapQuadroExperimentacao(_m: CanonicalBusinessModel, _idPlano: string): Record<string, unknown>[] {
     return [];
   }
 
   private mapFunilVendas(m: CanonicalBusinessModel, idPlano: string): Record<string, unknown>[] {
-    return m.marketing.channels.map((ch) => ({ idPlano, nome: ch.name, orcamento: ch.monthlyInvestment, qtdPessoasAlcancadas: 0, qtdPessoasChamadas: 0 }));
+    return m.marketing.channels.map((ch) => ({ idPlano, nome: ch.name, orcamento: ch.monthlyInvestment }));
   }
 
   private validate(collections: Record<string, Record<string, unknown>[]>): AdapterResult["validation"] {
@@ -195,7 +156,6 @@ export class PnboxAdapter {
       const items = collections[ferramenta.collectionName] || [];
       const errors: string[] = [];
       const warnings: string[] = [];
-
       if (items.length === 0) {
         warnings.push(`Coleção vazia para ${ferramenta.nome}`);
         totalWarnings++;
@@ -209,17 +169,10 @@ export class PnboxAdapter {
           }
         });
       }
-
       const status = errors.length === 0 ? (items.length === 0 ? "missing" : "valid") : "error";
-      detailsByCollection[ferramenta.collectionName] = {
-        ferramentaId: ferramenta.id,
-        collectionName: ferramenta.collectionName,
-        status,
-        itemsValidated: items.length,
-        errors,
-        warnings,
-      };
-      detailsByTool[ferramenta.id] = { ...detailsByCollection[ferramenta.collectionName] };
+      const detail = { ferramentaId: ferramenta.id, collectionName: ferramenta.collectionName, status, itemsValidated: items.length, errors, warnings };
+      detailsByCollection[ferramenta.collectionName] = detail;
+      detailsByTool[ferramenta.id] = detail;
     }
 
     return { valid: totalErrors === 0, totalErrors, totalWarnings, detailsByTool, detailsByCollection };
