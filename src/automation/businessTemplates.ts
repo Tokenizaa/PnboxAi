@@ -1,5 +1,3 @@
-import { ID_PLANO_PADRAO } from './schemaCatalog';
-
 export interface BusinessTemplate {
   id: string;
   nome: string;
@@ -10,20 +8,17 @@ export interface BusinessTemplate {
 }
 
 /**
- * Templates de negócio vazios que devem ser preenchidos com dados reais
- * provenientes de pesquisa de mercado ou entrada do usuário.
- * NÃO contêm dados simulados ou mocks - apenas estruturas vazias
- * que indicam onde os dados reais devem ser colocados.
+ * Estruturas de template sem identidade de plano.
+ * O plano é sempre fornecido pelo usuário e confirmado pelo PNBOX.
  */
 export const TEMPLATES_NEGOCIO: BusinessTemplate[] = [
   {
     id: 'placeholder',
-    nome: 'Template Placeholder - Substituir com Dados Reais',
-    setor: 'Informe o setor baseado em pesquisa real',
-    descricao: 'Este é um template placeholder. Os dados devem ser substituídos por informações reais obtidas através de pesquisa de mercado válida.',
-    planoId: ID_PLANO_PADRAO,
+    nome: 'Template de Estrutura PNBOX',
+    setor: '',
+    descricao: '',
+    planoId: '',
     dados: {
-      // Todas as estruturas vazias - serão preenchidas com dados reais da pesquisa
       segmentacaoMercado: [],
       geradorPersonas: [],
       jornadaCliente: [],
