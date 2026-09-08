@@ -1,9 +1,9 @@
-import { Router, Express } from 'express';
+import { Router, Express, Response } from 'express';
 import { supabase, isSupabaseConfigured, authMiddleware } from '../services/authStore';
 
 const router = Router();
 
-function requireSupabase(res: Parameters<Parameters<typeof router.post>[1]>[1]) {
+function requireSupabase(res: Response): boolean {
   if (!isSupabaseConfigured || !supabase) {
     res.status(503).json({ status: 'error', message: 'Serviço de autenticação indisponível' });
     return false;
@@ -24,7 +24,7 @@ router.post('/register', async (req, res) => {
   if (password.length < 6) {
     return res.status(400).json({ status: 'error', message: 'Senha deve ter pelo menos 6 caracteres' });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!/^([^\s@]+)@([^\s@]+)\.([^\s@]+)$/.test(email)) {
     return res.status(400).json({ status: 'error', message: 'Email inválido' });
   }
 
