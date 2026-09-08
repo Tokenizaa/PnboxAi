@@ -28,5 +28,8 @@ jobs:
       - name: Unit/integration test suite
         run: npm test
 
+      - name: Security P0 regression guard
+        run: node src/server/__tests__/securityP0.test.js
+
       - name: Production build
         run: npm run build
