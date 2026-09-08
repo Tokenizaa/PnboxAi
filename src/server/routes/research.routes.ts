@@ -3,6 +3,7 @@ import { authMiddleware, optionalAuthMiddleware } from '../services/authStore';
 import { getUserPlans, setUserPlans } from '../services/plansStore';
 import { ResearchEngine } from '../../research/ResearchEngine';
 import { executarPesquisaUnificada } from '../../automation/aiProviders';
+import { SchemaGenerator } from '../../utils/schemaGenerator';
 
 const researchRouter = Router();
 const aiRouter = Router();
@@ -77,7 +78,19 @@ researchRouter.get('/:planId', authMiddleware, (req, res) => {
 
 // ===== AI ROUTES =====
 aiRouter.post('/deep-research', optionalAuthMiddleware, async (req, res) => {
-  const { prompt, cidadeUf, orcamentoEstimado, publicoAlvo, modeloAprofundado, provider, useSearchGrounding } = req.body || {};
+  const {
+    prompt,
+    cidadeUf,
+    orcamentoEstimado,
+    publicoAlvo,
+    modeloAprofundado,
+    provider,
+    useSearchGrounding,
+    nvidiaApiKey,
+    nvidiaModel,
+    nvidiaAccountSlot,
+    geminiModel
+  } = req.body || {};
 
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
     return res.status(400).json({
@@ -94,12 +107,17 @@ aiRouter.post('/deep-research', optionalAuthMiddleware, async (req, res) => {
         orcamentoEstimado: Number(orcamentoEstimado) || undefined,
         publicoAlvo,
         modeloAprofundado: !!modeloAprofundado,
-        provider: provider || 'gemini',
-        useSearchGrounding: !!useSearchGrounding
+        provider: provider || 'nvidia',
+        useSearchGrounding: !!useSearchGrounding,
+        nvidiaApiKey,
+        nvidiaModel,
+        nvidiaAccountSlot,
+        geminiModel
       }
     );
     res.json({
       status: 'ok',
+      report: planoGerado,
       plano: planoGerado
     });
   } catch (err: any) {
@@ -116,7 +134,10 @@ aiRouter.post('/deep-research-v2', optionalAuthMiddleware, async (req, res) => {
     publicoAlvo,
     modeloAprofundado,
     idPlano,
-    maxIterations
+    maxIterations,
+    provider,
+    nvidiaApiKey,
+    nvidiaModel
   } = req.body || {};
 
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -165,24 +186,39 @@ aiRouter.post('/synthesize-plan', optionalAuthMiddleware, async (req, res) => {
     publicoAlvo,
     modeloAprofundado,
     idPlano,
-    maxIterations
+    maxIterations,
+    research,
+    provider,
+    nvidiaApiKey,
+    nvidiaModel
   } = req.body || {};
 
-  if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return res.status(400).json({
-      status: 'error',
-      mensagem: 'O prompt da ideia de negócio é obrigatório.'
-    });
-  }
-
-  if (!idPlano || typeof idPlano !== 'string') {
-    return res.status(400).json({
-      status: 'error',
-      mensagem: 'O ID do plano de negócio é obrigatório.'
-    });
-  }
+  const rawIdPlano = idPlano || req.body?.planId || '';
+  const effectiveIdPlano = (rawIdPlano && rawIdPlano !== ':idPlano' && !rawIdPlano.startsWith('plano_'))
+    ? rawIdPlano
+    : '';
 
   try {
+    // Caso 1: Já recebemos o relatório de pesquisa (ex: vindo de /api/ai/deep-research)
+    if (research && typeof research === 'object') {
+      const dados14 = SchemaGenerator.generateFromResearch(research, effectiveIdPlano);
+      return res.json({
+        status: 'ok',
+        dados14Ferramentas: dados14,
+        planData: dados14,
+        canonicalModel: (research as any).canonicalModel || null,
+        report: research
+      });
+    }
+
+    // Caso 2: Gerar pesquisa e sintetizar diretamente a partir do prompt
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        mensagem: 'O prompt da ideia de negócio ou o relatório de pesquisa é obrigatório.'
+      });
+    }
+
     const engine = new ResearchEngine();
     const researchResult = await engine.execute({
       prompt,
@@ -190,14 +226,17 @@ aiRouter.post('/synthesize-plan', optionalAuthMiddleware, async (req, res) => {
       orcamentoEstimado: Number(orcamentoEstimado) || 100000,
       publicoAlvo: publicoAlvo || 'Consumidor final / B2C',
       modeloAprofundado: !!modeloAprofundado,
-      idPlano: idPlano,
+      idPlano: effectiveIdPlano,
       maxIterations: maxIterations || 3,
     });
 
     const canonicalModel = researchResult.report.canonicalModel;
+    const dados14 = SchemaGenerator.generateFromResearch(researchResult.report, effectiveIdPlano);
 
-    res.json({
+    return res.json({
       status: 'ok',
+      dados14Ferramentas: dados14,
+      planData: dados14,
       canonicalModel,
       researchMetadata: {
         iterations: researchResult.iterations,
@@ -209,7 +248,7 @@ aiRouter.post('/synthesize-plan', optionalAuthMiddleware, async (req, res) => {
     });
   } catch (err: any) {
     console.error('[API /api/ai/synthesize-plan] Erro:', err);
-    res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao sintetizar plano de negócio' });
+    return res.status(500).json({ status: 'error', mensagem: err.message || 'Erro ao sintetizar plano de negócio' });
   }
 });
 

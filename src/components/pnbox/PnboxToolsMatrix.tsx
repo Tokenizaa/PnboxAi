@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowLeft,
   Sparkles,
@@ -25,10 +25,14 @@ import {
   Settings,
   RefreshCw,
   Eye,
-  Check
+  Check,
+  FileDown,
+  CloudUpload
 } from 'lucide-react';
 import { FerramentaInfo, PlanoCriadoInfo, AuthSessionState } from '../../types/pnbox';
 import { PnboxBusinessHealthSummary } from './PnboxBusinessHealthSummary';
+import { PnboxDiffReviewModal } from './PnboxDiffReviewModal';
+import { exportPlanToJson, exportPlanToMarkdown } from '../../utils/planExport';
 
 interface PnboxToolsMatrixProps {
   plano: PlanoCriadoInfo;
@@ -37,7 +41,7 @@ interface PnboxToolsMatrixProps {
   onSelectFerramenta: (ferramentaId: string) => void;
   onBackToPlans: () => void;
   onExecuteAllWithAi: () => void;
-  onSyncAllToSebrae: () => void;
+  onSyncAllToSebrae: (selectedToolIds?: string[]) => void | Promise<void>;
   onPullFromSebrae?: () => void;
   onBidirectionalSync?: () => void;
   onOpenBackendSettings: () => void;
@@ -59,6 +63,9 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
   onQuickGenerateToolAi,
   isSyncing = false
 }) => {
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
   // Mapa de ícones canônicos do PNBOX
   const getToolIcon = (id: string) => {
     switch (id) {
@@ -203,15 +210,26 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
             </p>
           </div>
 
-          {/* Barra de Ações Rápidas (IA + Sincronização Sebrae) */}
+          {/* Barra de Ações Rápidas (IA + Sincronização Sebrae + Exportação) */}
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={onExecuteAllWithAi}
               className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-pink-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
-              title="Preencher todas as 14 ferramentas automaticamente com IA Gemini"
+              title="Preencher todas as 14 ferramentas automaticamente com IA Gemini/NVIDIA"
             >
               <Sparkles className="w-4 h-4 text-pink-200" />
               <span>Preencher Plano com IA (1 Clique)</span>
+            </button>
+
+            {/* Botão de Conciliação e Revisão Pré-Push */}
+            <button
+              onClick={() => setIsReviewOpen(true)}
+              disabled={isSyncing}
+              className="flex items-center gap-2 px-4 py-2.5 bg-[#1877f2] hover:bg-[#166fe5] text-white rounded-full text-xs sm:text-sm font-semibold shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+              title="Revisar dados gerados e autorizar gravação no Sebrae PNBOX"
+            >
+              <CloudUpload className="w-4 h-4" />
+              <span>Revisar & Gravar no PNBOX</span>
             </button>
 
             {onPullFromSebrae && (
@@ -226,19 +244,42 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
               </button>
             )}
 
-            <button
-              onClick={onBidirectionalSync || onSyncAllToSebrae}
-              disabled={isSyncing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-[#1877f2] hover:bg-[#166fe5] text-white rounded-full text-xs sm:text-sm font-semibold shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
-              title="Sincronização Bidirecional com o Sebrae PNBOX"
-            >
-              {isSyncing ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <RefreshCw className="w-4 h-4" />
+            {/* Menu de Exportação do Plano */}
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-full text-xs sm:text-sm font-medium transition-all cursor-pointer"
+                title="Exportar plano de negócio completo"
+              >
+                <FileDown className="w-4 h-4 text-emerald-300" />
+                <span>Exportar</span>
+              </button>
+
+              {showExportMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-[#15143a] border border-[#2d2a63] rounded-2xl shadow-xl py-2 z-30 animate-in fade-in zoom-in-95 duration-150">
+                  <button
+                    onClick={() => {
+                      exportPlanToJson(plano);
+                      setShowExportMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-slate-200 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2"
+                  >
+                    <span className="font-mono text-indigo-300 font-bold">.JSON</span>
+                    <span>Arquivo Canônico</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      exportPlanToMarkdown(plano);
+                      setShowExportMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-slate-200 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2"
+                  >
+                    <span className="font-mono text-pink-300 font-bold">.MD</span>
+                    <span>Relatório Markdown</span>
+                  </button>
+                </div>
               )}
-              <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar Bidirecional'}</span>
-            </button>
+            </div>
 
             <button
               onClick={onOpenBackendSettings}
@@ -351,6 +392,18 @@ export const PnboxToolsMatrix: React.FC<PnboxToolsMatrixProps> = ({
           </div>
         </div>
       </footer>
+
+      {/* Modal de Conciliação e Confirmação de Sincronização */}
+      <PnboxDiffReviewModal
+        isOpen={isReviewOpen}
+        onClose={() => setIsReviewOpen(false)}
+        plano={plano}
+        ferramentas={ferramentas}
+        onConfirmSync={async (selectedIds) => {
+          await onSyncAllToSebrae(selectedIds);
+        }}
+        isSyncing={isSyncing}
+      />
     </div>
   );
 };

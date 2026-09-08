@@ -89,6 +89,12 @@ export const PnboxToolDetailView: React.FC<PnboxToolDetailViewProps> = ({
 
   // Helper para formatar o texto do item no card branco estilo PNBOX
   const formatItemDisplay = (item: Record<string, unknown>, index: number) => {
+    const fmtCurrency = (val: unknown) => {
+      const num = Number(val);
+      if (isNaN(num)) return String(val ?? 'R$ 0,00');
+      return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    };
+
     // Caso tenha detalheVisual específico
     if (item.detalheVisual) {
       return {
@@ -97,29 +103,80 @@ export const PnboxToolDetailView: React.FC<PnboxToolDetailViewProps> = ({
       };
     }
 
+    // 1. Concorrentes
     if (item.nomeConcorrente) {
       return {
         title: item.nomeConcorrente as string,
-        content: `${item.diferencial || ''} | Preço: ${item.preco || 'Médio'} | Pontos Fortes: ${item.pontosFortes || ''}`
+        content: `Diferencial: ${item.diferencial || 'Padrão'} | Preço: ${item.preco || 'Médio'} | Pontos Fortes: ${item.pontosFortes || '-'} | Pontos Fracos: ${item.pontosFracos || '-'}`
       };
     }
 
-    if (item.nome) {
+    // 2. Personas
+    if (item.nome && (item.profissao || item.idade)) {
       return {
-        title: item.nome as string,
-        content: `${item.profissao || ''} - ${item.idade || ''} | ${item.dores || item.objetivos || ''}`
+        title: `${item.nome} (${item.profissao || 'Profissional'}, ${item.idade || '30 anos'})`,
+        content: `Renda/Ticket: ${item.renda || '-'} | Dores: ${item.dores || '-'} | Objetivos: ${item.objetivos || '-'}`
       };
     }
 
-    if (item.tarefasCliente) {
+    // 3. Proposta de Valor
+    if (item.tarefasCliente || item.produtosServicos) {
       return {
-        title: 'Proposta de Valor Principal',
-        content: `Produtos: ${item.produtosServicos} | Aliviadores: ${item.aliviadoresDores} | Ganhos: ${item.criadoresGanhos}`
+        title: (item.produtosServicos as string) || 'Proposta de Valor Principal',
+        content: `Ganhos: ${item.ganhos || item.criadoresGanhos || '-'} | Aliviadores: ${item.aliviadoresDores || '-'} | Dores: ${item.dores || '-'}`
+      };
+    }
+
+    // 4. Investimento Fixo
+    if (item.categoria && item.valorTotal !== undefined) {
+      return {
+        title: `${item.item || 'Equipamento/Instalação'} (${item.categoria})`,
+        content: `Qtd: ${item.quantidade || 1} | Unitário: ${fmtCurrency(item.valorUnitario)} | Total: ${fmtCurrency(item.valorTotal)}`
+      };
+    }
+
+    // 5. Custos Fixos
+    if (item.categoria && item.valorMensal !== undefined) {
+      return {
+        title: `${item.categoria} - ${fmtCurrency(item.valorMensal)}/mês`,
+        content: (item.descricao as string) || 'Despesa fixa mensal projetada'
+      };
+    }
+
+    // 6. Produtos / Serviços
+    if (item.precoVenda !== undefined && item.nome) {
+      return {
+        title: `${item.nome} (${item.tipo || 'Serviço'})`,
+        content: `Preço de Venda: ${fmtCurrency(item.precoVenda)} | Custo Unitário: ${fmtCurrency(item.custoUnitario)} | Margem: ${fmtCurrency(item.margemContribuicao)} | Faturamento Estimado: ${fmtCurrency(item.faturamentoMensal)}`
+      };
+    }
+
+    // 7. Capital de Giro
+    if (item.necessidadeCapitalGiro !== undefined) {
+      return {
+        title: `Necessidade de Capital de Giro: ${fmtCurrency(item.necessidadeCapitalGiro)}`,
+        content: `Prazo Recebimento: ${item.contasReceberDias ?? 30} dias | Prazo Fornecedores: ${item.fornecedoresDias ?? 30} dias | Giro Estoque: ${item.estoqueDias ?? 15} dias`
+      };
+    }
+
+    // 8. Investimento Pré-operacional
+    if (item.item && item.valor !== undefined) {
+      return {
+        title: `${item.item} - ${fmtCurrency(item.valor)}`,
+        content: (item.descricao as string) || 'Investimento pré-operacional de abertura'
+      };
+    }
+
+    // 9. SWOT / Forças e Fraquezas
+    if (item.tipo && item.impacto) {
+      return {
+        title: `[${item.tipo}] Impacto ${item.impacto}`,
+        content: (item.descricao as string) || '-'
       };
     }
 
     if (item.descricao) {
-      const extra = item.valor ? ` - R$ ${item.valor}` : (item.tipo ? ` (${item.tipo})` : '');
+      const extra = item.valor ? ` - ${fmtCurrency(item.valor)}` : (item.tipo ? ` (${item.tipo})` : '');
       return {
         title: `Item ${index + 1}${extra}`,
         content: item.descricao as string

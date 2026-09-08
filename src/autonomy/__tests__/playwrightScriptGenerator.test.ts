@@ -1,13 +1,9 @@
 /**
- * Testes para playwrightScriptGenerator - Verifica geração de scripts e tratamento de erros
+ * Testes para playwrightScriptGenerator - Verifica geração de scripts, proteção de credenciais e integridade
  * Rodar: npx tsx src/autonomy/__tests__/playwrightScriptGenerator.test.ts
  */
 import { gerarScriptPlaywrightOficial, gerarScriptCriarNovoPlanoPlaywright } from '../../automation/playwrightScriptGenerator';
-import { TEMPLATES_NEGOCIO } from '../../automation/businessTemplates';
-import { ID_PLANO_PADRAO } from '../../automation/schemaCatalog';
-import { CREDENCIAIS_PADRAO } from '../../automation/auth';
 
-// Funções de asserção simples (similar aos testes existentes)
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
     console.error('❌ FAIL:', msg);
@@ -45,241 +41,74 @@ function assertStringContains(str: string, substring: string, msg?: string): voi
 
 console.log('\n=== Testando playwrightScriptGenerator ===\n');
 
-// Teste 1: Verificar geração de script oficial com parâmetros padrão
+// Teste 1: Rejeitar plano vazio ou sintético na geração de script oficial
 {
-  console.log('Teste 1: Geração de script oficial com parâmetros padrão');
-  
+  console.log('Teste 1: Rejeição de plano sintético ou vazio');
   try {
-    const script = gerarScriptPlaywrightOficial();
-    
+    gerarScriptPlaywrightOficial('', 'plano_sintetico_123');
+    console.error('❌ FAIL: Deveria ter lançado erro para ID sintético');
+    process.exitCode = 1;
+  } catch (err: any) {
+    assertStringContains(err.message, 'PNBOX_REAL_PLAN_REQUIRED', 'Lança erro PNBOX_REAL_PLAN_REQUIRED para ID sintético');
+  }
+
+  try {
+    gerarScriptPlaywrightOficial('', ':idPlano');
+    console.error('❌ FAIL: Deveria ter lançado erro para :idPlano');
+    process.exitCode = 1;
+  } catch (err: any) {
+    assertStringContains(err.message, 'PNBOX_REAL_PLAN_REQUIRED', 'Lança erro PNBOX_REAL_PLAN_REQUIRED para :idPlano');
+  }
+}
+
+// Teste 2: Geração de script oficial para plano real válido
+{
+  console.log('\nTeste 2: Geração de script oficial com ID real válido');
+  try {
+    const realPlanId = '9kX8yZb12Wq';
+    const script = gerarScriptPlaywrightOficial('', realPlanId);
     assertDefined(script, 'Script deve ser gerado');
     assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    assert(script.length > 0, 'Script não deve estar vazio');
-    
-    assertStringContains(script, 'AUTOMAÇÃO OFICIAL DO SEBRAE PNBOX VIA PLAYWRIGHT', 'Cabeçalho do script');
-    assertStringContains(script, 'import { chromium } from \'playwright\';', 'Importação do Playwright');
-    assertStringContains(script, 'const CONFIG = {', 'Definição de configuração');
-    assertStringContains(script, 'idPlano:', 'Configuração do ID do plano');
-    assertStringContains(script, 'credenciais:', 'Configuração das credenciais');
-    assertStringContains(script, 'DADOS_PLANO =', 'Dados do plano');
-    assertStringContains(script, 'async function preencherPnboxOficial()', 'Função principal');
-    assertStringContains(script, 'preencherPnboxOficial();', 'Chamada da função');
-    
-    console.log('  ✓ Script oficial gerado corretamente com parâmetros padrão');
+    assertStringContains(script, 'PNBOX — sessão Playwright observacional', 'Cabeçalho de sessão observacional');
+    assertStringContains(script, 'process.env.PNBOX_CPF', 'Usa variável de ambiente para CPF');
+    assertStringContains(script, 'process.env.PNBOX_PASSWORD', 'Usa variável de ambiente para senha');
+    assertStringContains(script, 'const PLAN_ID = "9kX8yZb12Wq";', 'ID real atribuído à constante PLAN_ID');
+    assertStringContains(script, 'https://pnbox.sebrae.com.br/planoNegocio/ferramentas/${PLAN_ID}', 'URL oficial do plano parametrizada com PLAN_ID');
+    // Garantir que nenhuma senha ou credencial sensível está embutida no script
+    assert(!script.includes('senha123'), 'Não contém senhas embutidas');
+    assert(!script.includes('custom456!'), 'Não contém senhas embutidas');
   } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script oficial');
+    console.error('❌ FAIL: Erro ao gerar script oficial com ID real');
     console.error('  Erro:', error);
     process.exitCode = 1;
   }
 }
 
-// Teste 2: Verificar geração de script com templateId customizado
+// Teste 3: Script de criação bloqueado com BLOCKED_EXTERNAL_CONTRACT / PNBOX_CREATE_CONTRACT_UNVERIFIED
 {
-  console.log('\nTeste 2: Geração de script com templateId customizado');
-  
+  console.log('\nTeste 3: Criação de novo plano bloqueada por ausência de contrato DDP comprovado');
   try {
-    const templateId = TEMPLATES_NEGOCIO[0].id;
-    const script = gerarScriptPlaywrightOficial(templateId);
-    
-    assertDefined(script, 'Script deve ser gerado');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    
-    assertStringContains(script, 'AUTOMAÇÃO OFICIAL DO SEBRAE PNBOX VIA PLAYWRIGHT', 'Cabeçalho do script');
-    // Verificar se contém dados do template selecionado
-    const templateData = JSON.stringify(TEMPLATES_NEGOCIO.find(t => t.id === templateId)?.dados);
-    assertStringContains(script, templateData, 'Dados do template selecionado');
-    
-    console.log('  ✓ Script oficial gerado corretamente com templateId customizado');
-    console.log(`  ✓ Template usado: ${templateId}`);
+    const script = gerarScriptCriarNovoPlanoPlaywright('Empresa Teste', 'Tecnologia');
+    assertDefined(script, 'Script de criação bloqueado gerado');
+    assertStringContains(script, 'PNBOX_CREATE_CONTRACT_UNVERIFIED', 'Contém aviso explícito de contrato de criação não verificado');
+    assertStringContains(script, 'throw new Error', 'Lança erro em tempo de execução para evitar criação acidental');
   } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script com templateId customizado');
+    console.error('❌ FAIL: Erro ao gerar script de criação bloqueado');
     console.error('  Erro:', error);
     process.exitCode = 1;
   }
 }
 
-// Teste 3: Verificar geração de script com idPlano customizado
+// Teste 4: Rejeitar ID sugerido sintético na criação de plano
 {
-  console.log('\nTeste 3: Geração de script com idPlano customizado');
-  
+  console.log('\nTeste 4: Rejeição de ID sugerido sintético');
   try {
-    const customIdPlano = 'custom-plan-789';
-    const script = gerarScriptPlaywrightOficial(undefined, customIdPlano);
-    
-    assertDefined(script, 'Script deve ser gerado');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    
-    assertStringContains(script, `idPlano: '${customIdPlano}'`, 'ID do plano customizado');
-    
-    console.log('  ✓ Script oficial gerado corretamente com idPlano customizado');
-    console.log(`  ✓ ID do plano: ${customIdPlano}`);
-  } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script com idPlano customizado');
-    console.error('  Erro:', error);
+    gerarScriptCriarNovoPlanoPlaywright('Empresa Teste', 'Tecnologia', undefined, 'plano_custom_999');
+    console.error('❌ FAIL: Deveria rejeitar ID sugerido sintético');
     process.exitCode = 1;
+  } catch (err: any) {
+    assertStringContains(err.message, 'PNBOX_REAL_PLAN_REQUIRED', 'Lança erro ao tentar usar ID sugerido sintético');
   }
 }
 
-// Teste 4: Verificar geração de script com credenciais customizadas
-{
-  console.log('\nTeste 4: Geração de script com credenciais customizadas');
-  
-  try {
-    const customCredenciais = {
-      cpf: '111.222.333-44',
-      password: 'senha-segura-123',
-      idPlano: ID_PLANO_PADRAO
-    };
-    const script = gerarScriptPlaywrightOficial(undefined, ID_PLANO_PADRAO, customCredenciais);
-    
-    assertDefined(script, 'Script deve ser gerado');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    
-    assertStringContains(script, `cpf: '${customCredenciais.cpf}'`, 'CPF customizado');
-    assertStringContains(script, `password: '${customCredenciais.password}'`, 'Senha customizada');
-    
-    console.log('  ✓ Script oficial gerado corretamente com credenciais customizadas');
-    console.log(`  ✓ CPF: ${customCredenciais.cpf}`);
-  } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script com credenciais customizadas');
-    console.error('  Erro:', error);
-    process.exitCode = 1;
-  }
-}
-
-// Teste 5: Verificar comportamento de fallback para templateId inválido
-{
-  console.log('\nTeste 5: Fallback para templateId inválido');
-  
-  try {
-    const invalidTemplateId = 'template-que-nao-existe';
-    const firstTemplate = TEMPLATES_NEGOCIO[0];
-    const script = gerarScriptPlaywrightOficial(invalidTemplateId);
-    
-    assertDefined(script, 'Script deve ser gerado mesmo com templateId inválido');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    
-    // Deve fazer fallback para o primeiro template
-    const firstTemplateData = JSON.stringify(firstTemplate.dados);
-    assertStringContains(script, firstTemplateData, 'Dados do primeiro template (fallback)');
-    
-    console.log('  ✓ Script gerado com fallback para primeiro template quando templateId é inválido');
-    console.log(`  ✓ TemplateId inválido: ${invalidTemplateId}`);
-    console.log(`  ✓ Template usado (fallback): ${firstTemplate.id}`);
-  } catch (error) {
-    console.error('❌ FAIL: Erro ao testar fallback de templateId');
-    console.error('  Erro:', error);
-    process.exitCode = 1;
-  }
-}
-
-// Teste 6: Verificar geração de script para criação de novo plano
-{
-  console.log('\nTeste 6: Geração de script para criação de novo plano');
-  
-  try {
-    const script = gerarScriptCriarNovoPlanoPlaywright(
-      'Nome do Teste',
-      'Setor do Teste'
-    );
-    
-    assertDefined(script, 'Script deve ser gerado');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    assert(script.length > 0, 'Script não deve estar vazio');
-    
-    assertStringContains(script, 'AUTOMAÇÃO OFICIAL DO SEBRAE PNBOX - CRIAÇÃO DE NOVO PLANO COM IA & DEEP RESEARCH', 'Cabeçalho do script de criação');
-    assertStringContains(script, 'import { chromium } from \'playwright\';', 'Importação do Playwright');
-    assertStringContains(script, 'const CONFIG = {', 'Definição de configuração');
-    assertStringContains(script, 'nomePlano:', 'Configuração do nome do plano');
-    assertStringContains(script, 'setor: ', 'Configuração do setor');
-    assertStringContains(script, 'idPlanoSugerido:', 'Configuração do ID sugerido do plano');
-    assertStringContains(script, 'credenciais:', 'Configuração das credenciais');
-    assertStringContains(script, 'DADOS_14_FERRAMENTAS =', 'Dados das 14 ferramentas');
-    assertStringContains(script, 'async function criarNovoPlanoNoPnbox()', 'Função principal');
-    assertStringContains(script, 'criarNovoPlanoNoPnbox();', 'Chamada da função');
-    
-    console.log('  ✓ Script de criação de novo plano gerado corretamente');
-  } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script de criação de novo plano');
-    console.error('  Erro:', error);
-    process.exitCode = 1;
-  }
-}
-
-// Teste 7: Verificar geração de script com todos os parâmetros customizados para criação de novo plano
-{
-  console.log('\nTeste 7: Geração de script de criação com parâmetros customizados');
-  
-  try {
-    const nomePlano = 'Empresa Customizada LTDA';
-    const setor = 'Tecnologia da Informação';
-    const idPlanoSugerido = 'plano-custom-999';
-    const credenciais = { cpf: '999.888.777-66', password: 'custom456!', idPlano: ID_PLANO_PADRAO };
-    const dadosCustomizados = {
-      testeColecao: [
-        { campo1: 'valor1', campo2: 'valor2' },
-        { campo1: 'valor3', campo2: 'valor4' }
-      ]
-    };
-    
-    const script = gerarScriptCriarNovoPlanoPlaywright(
-      nomePlano,
-      setor,
-      dadosCustomizados,
-      idPlanoSugerido,
-      credenciais
-    );
-    
-    assertDefined(script, 'Script deve ser gerado');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    
-    assertStringContains(script, `nomePlano: ${JSON.stringify(nomePlano)}`, 'Nome do plano customizado');
-    assertStringContains(script, `setor: ${JSON.stringify(setor)}`, 'Setor customizado');
-    assertStringContains(script, `idPlanoSugerido: '${idPlanoSugerido}'`, 'ID sugerido customizado');
-    assertStringContains(script, `cpf: '${credenciais.cpf}'`, 'CPF customizado');
-    assertStringContains(script, `password: '${credenciais.password}'`, 'Senha customizada');
-    // Verificar se contém os dados customizados
-    assertStringContains(script, '"campo1":"valor1"', 'Primeiro registro de dados customizados');
-    assertStringContains(script, `"campo2":"${dadosCustomizados.testeColecao[1].campo2}"`, 'Segundo registro de dados customizados');
-    
-    console.log('  ✓ Script de criação de novo plano gerado corretamente com todos os parâmetros customizados');
-    console.log(`  ✓ Nome do plano: ${nomePlano}`);
-    console.log(`  ✓ Setor: ${setor}`);
-    console.log(`  ✓ ID sugerido: ${idPlanoSugerido}`);
-  } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script de criação com parâmetros customizados');
-    console.error('  Erro:', error);
-    process.exitCode = 1;
-  }
-}
-
-// Teste 8: Verificar comportamento com dados customizados vazios
-{
-  console.log('\nTeste 8: Comportamento com dados customizados vazios');
-  
-  try {
-    const script = gerarScriptCriarNovoPlanoPlaywright(
-      'Teste Vazio',
-      'Setor Vazio',
-      {} // Dados customizados vazios
-    );
-    
-    assertDefined(script, 'Script deve ser gerado mesmo com dados vazios');
-    assertEqual(typeof script, 'string', 'Script deve ser uma string');
-    
-    assertStringContains(script, 'DADOS_14_FERRAMENTAS = {}', 'Dados das 14 ferramentas devem ser objeto vazio');
-    
-    console.log('  ✓ Script gerado corretamente com dados customizados vazios');
-  } catch (error) {
-    console.error('❌ FAIL: Erro ao gerar script com dados customizados vazios');
-    console.error('  Erro:', error);
-    process.exitCode = 1;
-  }
-}
-
-console.log('\n✓ Todos os testes de playwrightScriptGenerator concluídos');
-console.log('Nota: Estes testes verificam que os geradores de script funcionam corretamente');
-console.log('      com diversos parâmetros e tratam adequadamente casos de fallback.\n');
-
-// Indicar que os testes foram concluídos com sucesso
-process.exitCode = 0;
+console.log('\n✓ Todos os testes de playwrightScriptGenerator concluídos com sucesso.\n');

@@ -93,11 +93,14 @@ export function createSearchService(): SearchService {
 
   if (apiKey && engineId) {
     return new GoogleCustomSearchService();
-  } else {
-    // Log warning in development
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('[SearchService] Google Custom Search API not configured. Using stub search service.');
-    }
-    return new StubSearchService();
   }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'MISSING_SEARCH_CREDENTIALS: As variáveis GOOGLE_CUSTOM_SEARCH_API_KEY e GOOGLE_CUSTOM_SEARCH_ENGINE_ID são obrigatórias em ambiente de produção para busca web real.'
+    );
+  }
+
+  console.warn('[SearchService] Google Custom Search API não configurada. Usando stub apenas para desenvolvimento.');
+  return new StubSearchService();
 }

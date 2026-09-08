@@ -25,6 +25,7 @@
         "react-router-dom": "^7.18.3",
         "recharts": "^3.10.1",
         "vite": "^6.2.3",
+        "zod": "^4.5.4",
       },
       "devDependencies": {
         "@types/bcrypt": "^6.0.0",

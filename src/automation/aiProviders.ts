@@ -202,54 +202,102 @@ RETORNE ESTRITAMENTE UM JSON VÁLIDO no seguinte formato (sem blocos de texto ex
   let responseText = '';
   let fontesPesquisa: Array<{ titulo: string; uri: string }> = [];
 
-  if (provider === 'nvidia') {
-    const nvidiaKey = options.nvidiaApiKey || getNvidiaApiKey(options.nvidiaAccountSlot || 1);
-    const text = await callNvidiaNimChat(
-      [
-        {
-          role: 'system',
-          content:
-            'Você é um consultor sênior de negócios do Sebrae e especialista em planejamento estratégico. Responda apenas com JSON estruturado e válido.'
-        },
-        { role: 'user', content: promptInvestigacao }
-      ],
-      {
-        apiKey: nvidiaKey || undefined,
-        accountSlot: options.nvidiaAccountSlot || 1,
-        model: options.nvidiaModel || 'meta/llama-3.3-70b-instruct'
-      }
-    );
-    responseText = text;
-    fontesPesquisa.push({
-      titulo: `NVIDIA NIM AI (${options.nvidiaModel || 'meta/llama-3.3-70b-instruct'})`,
-      uri: 'https://build.nvidia.com'
-    });
-  } else {
-    // Provider Gemini (com Google Search Grounding)
+  // Função auxiliar para chamar Gemini
+  const callGemini = async (): Promise<string> => {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
-      const geminiResponse = await ai.models.generateContent({
-        model: options.geminiModel || 'gemini-3.7-flash',
-        contents: promptInvestigacao,
-        config: {
-          systemInstruction: 'Você é um consultor sênior de negócios do Sebrae e especialista em planejamento estratégico.',
-          tools: options.useSearchGrounding !== false ? [{ googleSearch: {} }] : undefined
+    if (!apiKey) throw new Error('GEMINI_API_KEY não configurada no servidor.');
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
+    const geminiResponse = await ai.models.generateContent({
+      model: options.geminiModel || 'gemini-3.7-flash',
+      contents: promptInvestigacao,
+      config: {
+        systemInstruction: 'Você é um consultor sênior de negócios do Sebrae e especialista em planejamento estratégico.',
+        tools: options.useSearchGrounding !== false ? [{ googleSearch: {} }] : undefined
+      }
+    });
+    const groundingChunks = (geminiResponse as any).candidates?.[0]?.groundingMetadata?.groundingChunks;
+    if (Array.isArray(groundingChunks)) {
+      for (const chunk of groundingChunks) {
+        if (chunk.web?.uri && chunk.web?.title) {
+          fontesPesquisa.push({
+            titulo: chunk.web.title,
+            uri: chunk.web.uri
+          });
         }
-      });
+      }
+    }
+    return geminiResponse.text || '';
+  };
 
-      responseText = geminiResponse.text || '';
+  // Função auxiliar para chamar NVIDIA com suporte a múltiplos slots
+  const callNvidiaWithFailover = async (): Promise<string> => {
+    const primarySlot = options.nvidiaAccountSlot || 1;
+    const slotsToTry: Array<1 | 2 | 3> = [primarySlot, 1, 2, 3].filter(
+      (s, idx, arr) => arr.indexOf(s) === idx
+    ) as Array<1 | 2 | 3>;
 
-      const groundingChunks = (geminiResponse as any).candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (Array.isArray(groundingChunks)) {
-        for (const chunk of groundingChunks) {
-          if (chunk.web?.uri && chunk.web?.title) {
-            fontesPesquisa.push({
-              titulo: chunk.web.title,
-              uri: chunk.web.uri
-            });
+    let lastError: any = null;
+
+    for (const slot of slotsToTry) {
+      const key = slot === primarySlot && options.nvidiaApiKey ? options.nvidiaApiKey : getNvidiaApiKey(slot);
+      if (!key) continue;
+
+      try {
+        console.log(`[AI Providers] Tentando NVIDIA NIM no Slot ${slot}...`);
+        const text = await callNvidiaNimChat(
+          [
+            {
+              role: 'system',
+              content:
+                'Você é um consultor sênior de negócios do Sebrae e especialista em planejamento estratégico. Responda apenas com JSON estruturado e válido.'
+            },
+            { role: 'user', content: promptInvestigacao }
+          ],
+          {
+            apiKey: key,
+            accountSlot: slot,
+            model: options.nvidiaModel || 'meta/llama-3.3-70b-instruct'
           }
-        }
+        );
+        fontesPesquisa.push({
+          titulo: `NVIDIA NIM AI (${options.nvidiaModel || 'meta/llama-3.3-70b-instruct'} - Slot ${slot})`,
+          uri: 'https://build.nvidia.com'
+        });
+        return text;
+      } catch (err: any) {
+        console.warn(`[AI Providers] Falha no Slot NVIDIA ${slot}:`, err.message);
+        lastError = err;
+      }
+    }
+    throw lastError || new Error('Nenhuma chave de API NVIDIA válida encontrada nos slots configurados.');
+  };
+
+  if (provider === 'nvidia') {
+    try {
+      responseText = await callNvidiaWithFailover();
+    } catch (nvidiaErr: any) {
+      console.warn('[AI Providers] Todos os slots NVIDIA falharam. Tentando fallback para Gemini...', nvidiaErr.message);
+      if (process.env.GEMINI_API_KEY) {
+        responseText = await callGemini();
+        fontesPesquisa.push({
+          titulo: 'Gemini 3.7 Flash (Fallback Automático de Resiliência)',
+          uri: 'https://ai.google.dev'
+        });
+      } else {
+        throw nvidiaErr;
+      }
+    }
+  } else {
+    // Provider Gemini padrão
+    try {
+      responseText = await callGemini();
+    } catch (geminiErr: any) {
+      console.warn('[AI Providers] Falha no Gemini. Verificando fallback NVIDIA NIM...', geminiErr.message);
+      const nvidiaKey = options.nvidiaApiKey || getNvidiaApiKey(1) || getNvidiaApiKey(2) || getNvidiaApiKey(3);
+      if (nvidiaKey) {
+        responseText = await callNvidiaWithFailover();
+      } else {
+        throw geminiErr;
       }
     }
   }

@@ -156,8 +156,30 @@ function createMockCanonicalModel(): CanonicalBusinessModel {
 }
 
 export async function runPnboxAdapterTests(): Promise<void> {
-  await testRunner.test("PnboxAdapter.adapt generates all 14 collections", async () => {
+  const TEST_REAL_PLAN_ID = "k8Z19xQp2La";
+
+  await testRunner.test("PnboxAdapter rejects synthetic or missing idPlano", async () => {
     const adapter = new PnboxAdapter();
+    const model = createMockCanonicalModel();
+    let threwEmpty = false;
+    try {
+      adapter.adapt(model);
+    } catch (e: any) {
+      threwEmpty = e.message.includes("PNBOX_REAL_PLAN_REQUIRED");
+    }
+    assert(threwEmpty, "Should reject empty idPlano");
+
+    let threwSynthetic = false;
+    try {
+      adapter.adapt(model, { idPlano: "plano_temp_123" });
+    } catch (e: any) {
+      threwSynthetic = e.message.includes("PNBOX_REAL_PLAN_REQUIRED");
+    }
+    assert(threwSynthetic, "Should reject synthetic idPlano");
+  });
+
+  await testRunner.test("PnboxAdapter.adapt generates all 14 collections with real plan id", async () => {
+    const adapter = new PnboxAdapter(TEST_REAL_PLAN_ID);
     const model = createMockCanonicalModel();
     const result = adapter.adapt(model, { skipValidation: true });
     assertDefined(result.collections);
@@ -165,17 +187,17 @@ export async function runPnboxAdapterTests(): Promise<void> {
   });
 
   await testRunner.test("PnboxAdapter maps segmentacaoMercado correctly", async () => {
-    const adapter = new PnboxAdapter();
+    const adapter = new PnboxAdapter(TEST_REAL_PLAN_ID);
     const model = createMockCanonicalModel();
     const result = adapter.adapt(model, { skipValidation: true });
     const items = result.collections.segmentacaoMercado;
     assert(items.length === 1, "Should have 1 segment");
     assertDefined(items[0].descricao);
-    assertEqual(items[0].idPlano, ID_PLANO_PADRAO);
+    assertEqual(items[0].idPlano, TEST_REAL_PLAN_ID);
   });
 
   await testRunner.test("PnboxAdapter maps analiseConcorrencia correctly", async () => {
-    const adapter = new PnboxAdapter();
+    const adapter = new PnboxAdapter(TEST_REAL_PLAN_ID);
     const model = createMockCanonicalModel();
     const result = adapter.adapt(model, { skipValidation: true });
     const items = result.collections.analiseConcorrencia;
@@ -184,7 +206,7 @@ export async function runPnboxAdapterTests(): Promise<void> {
   });
 
   await testRunner.test("PnboxAdapter maps investimentoFixo correctly", async () => {
-    const adapter = new PnboxAdapter();
+    const adapter = new PnboxAdapter(TEST_REAL_PLAN_ID);
     const model = createMockCanonicalModel();
     const result = adapter.adapt(model, { skipValidation: true });
     const items = result.collections.investimentoFixo;
@@ -193,7 +215,7 @@ export async function runPnboxAdapterTests(): Promise<void> {
   });
 
   await testRunner.test("PnboxAdapter validates against schemaCatalog", async () => {
-    const adapter = new PnboxAdapter();
+    const adapter = new PnboxAdapter(TEST_REAL_PLAN_ID);
     const model = createMockCanonicalModel();
     const result = adapter.adapt(model, { skipValidation: false });
     assertDefined(result.validation);

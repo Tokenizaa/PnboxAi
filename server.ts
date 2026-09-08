@@ -12,8 +12,10 @@ import { registerPlansRoutes } from './src/server/routes/plans.routes';
 import { registerResearchRoutes } from './src/server/routes/research.routes';
 import { registerAutomationRoutes } from './src/server/routes/automation.routes';
 import { registerSystemRoutes } from './src/server/routes/system.routes';
+import { securityHeadersMiddleware, safeErrorHandler } from './src/server/middleware/security.middleware';
 
 const app = express();
+app.use(securityHeadersMiddleware);
 app.use(express.json({ limit: '10mb' }));
 
 // Register API routes
@@ -24,6 +26,9 @@ registerPlansRoutes(app);
 registerResearchRoutes(app);
 registerAutomationRoutes(app);
 registerSystemRoutes(app);
+
+// Safe API error handling
+app.use(safeErrorHandler);
 
 const PORT = 3000;
 
