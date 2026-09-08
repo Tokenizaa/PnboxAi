@@ -1,5 +1,5 @@
 import { Router, Express } from 'express';
-import { authMiddleware, supabase, getSupabaseUserClient, LOCAL_CREDENTIALS, encryptPnboxPassword } from '../services/authStore';
+import { authMiddleware, supabase, getSupabaseUserClient, encryptPnboxPassword } from '../services/authStore';
 import {
   createConnectionJob,
   getConnectionJob,
@@ -27,6 +27,9 @@ router.post('/connect', authMiddleware, async (req, res) => {
   if (!consentimentoAceito) {
     return res.status(400).json({ status: 'error', message: 'Consentimento é obrigatório' });
   }
+  if (!supabase || !userToken) {
+    return res.status(503).json({ status: 'error', message: 'Persistência segura de credenciais indisponível' });
+  }
 
   const activeJob = getActiveConnectionJob(userId);
   if (activeJob) {
@@ -39,7 +42,6 @@ router.post('/connect', authMiddleware, async (req, res) => {
 
   const job = createConnectionJob(userId);
   const jobId = job.jobId;
-
   res.status(202).json({ status: 'ok', jobId });
 
   (async () => {
@@ -49,37 +51,32 @@ router.post('/connect', authMiddleware, async (req, res) => {
         true,
         'LIVE',
         userId,
-        (step) => {
-          advanceStep(job, step);
-        }
+        (step) => advanceStep(job, step)
       );
 
       if (sessionResult.status === 'authenticated') {
-        completeConnectionJob(jobId, userId);
-
         try {
           const passwordEnc = encryptPnboxPassword(password);
-          LOCAL_CREDENTIALS.set(userId, {
-            cpf: cpf.trim(),
-            password,
-            idPlano: '',
-            updatedAt: new Date().toISOString()
-          });
-
-          const client = getSupabaseUserClient(userToken) || supabase;
-          if (client && (!userToken || !userToken.startsWith('local_token_'))) {
-            const { error: upsertErr } = await client.from('pnbox_credentials').upsert(
-              { user_id: userId, cpf: cpf.trim(), password_enc: passwordEnc },
-              { onConflict: 'user_id' }
-            );
-            if (upsertErr) {
-              console.error('[PNBoxConnection] Erro ao salvar credenciais no Supabase:', upsertErr.message);
-            } else {
-              console.log(`[PNBoxConnection] Credenciais persistidas no Supabase com sucesso para o usuário ${userId}`);
-            }
+          const client = getSupabaseUserClient(userToken);
+          if (!client) {
+            throw new Error('Sessão Supabase do usuário indisponível');
           }
+
+          const { error: upsertErr } = await client.from('pnbox_credentials').upsert(
+            { user_id: userId, cpf: cpf.trim(), password_enc: passwordEnc },
+            { onConflict: 'user_id' }
+          );
+          if (upsertErr) throw new Error(`Falha ao persistir credenciais PNBOX: ${upsertErr.message}`);
+
+          completeConnectionJob(jobId, userId);
         } catch (e: any) {
-          console.error('[PNBoxConnection] Falha ao persistir credenciais:', e?.message || e);
+          failConnectionJob(
+            jobId,
+            userId,
+            'CREDENTIAL_PERSISTENCE_FAILED',
+            'A autenticação foi concluída, mas não foi possível persistir as credenciais com segurança.',
+            e?.message || String(e)
+          );
         }
       } else {
         const loggedErr = sessionResult.ultimoLog || 'Falha na autenticação';
@@ -117,7 +114,7 @@ router.get('/connect/:jobId/status', authMiddleware, (req, res) => {
   if (!job) {
     return res.status(404).json({ status: 'error', message: 'Job não encontrado' });
   }
-  res.json({ status: 'ok', job: serializeConnectionJob(job) });
+  return res.json({ status: 'ok', job: serializeConnectionJob(job) });
 });
 
 export function registerPNBoxConnectionRoutes(app: Express) {
