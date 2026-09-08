@@ -1,5 +1,5 @@
 import { Router, Express, Response } from 'express';
-import { supabase, isSupabaseConfigured, authMiddleware } from '../services/authStore';
+import { supabase, isSupabaseConfigured, authMiddleware, getSupabaseUserClient } from '../services/authStore';
 
 const router = Router();
 
@@ -129,7 +129,17 @@ router.post('/refresh', async (req, res) => {
   });
 });
 
-router.post('/logout', authMiddleware, async (_req, res) => {
+router.post('/logout', authMiddleware, async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const token = req.headers.authorization?.substring(7);
+  const client = getSupabaseUserClient(token);
+  if (!client) {
+    return res.status(503).json({ status: 'error', message: 'Sessão Supabase indisponível para logout' });
+  }
+  const { error } = await client.auth.signOut();
+  if (error) {
+    return res.status(502).json({ status: 'error', message: 'Não foi possível revogar a sessão' });
+  }
   return res.json({ status: 'ok', message: 'Logout realizado com sucesso' });
 });
 
