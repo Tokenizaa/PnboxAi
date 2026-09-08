@@ -91,17 +91,6 @@ export function obterStatusSessaoAtualizada(): AuthSessionState {
   const firstUserId = userSessions.keys().next().value;
   return firstUserId ? obterStatusSessaoUsuario(firstUserId) : globalAuthState;
 }
-export function simularExpiracaoSessao(): AuthSessionState {
-  userSessions.clear();
-  globalAuthState.status = 'expired';
-  globalAuthState.isExpired = true;
-  globalAuthState.tempoRestanteMinutos = 0;
-  globalAuthState.meteorLoginToken = undefined;
-  globalAuthState.meteorUserId = undefined;
-  globalAuthState.isOnline = false;
-  addAuthLog('Todas as sessões encerradas — necessário novo login.', 'warn');
-  return globalAuthState;
-}
 
 export async function iniciarSessaoPlaywright(
   credentials: Credentials | null = null,
@@ -121,15 +110,17 @@ export async function iniciarSessaoPlaywright(
     addAuthLog('DRY_RUN desativado: a integração PNBOX exige autenticação LIVE real.', 'error');
     return userId ? obterStatusSessaoUsuario(userId) : globalAuthState;
   }
-  if (!credentials?.cpf || !credentials.password || !credentials.idPlano?.trim()) {
+  // idPlano não faz parte da autenticação Sebrae ID. Ele é selecionado/validado
+  // posteriormente contra o PNBOX antes de qualquer operação de plano.
+  if (!credentials?.cpf || !credentials.password) {
     globalAuthState.status = 'failed';
     globalAuthState.isOnline = false;
-    addAuthLog('CPF, senha e ID de plano PNBOX real são obrigatórios.', 'error');
+    addAuthLog('CPF e senha são obrigatórios para autenticação no Sebrae ID.', 'error');
     return userId ? obterStatusSessaoUsuario(userId) : globalAuthState;
   }
   globalAuthState.status = 'authenticating';
   globalAuthState.cpf = credentials.cpf;
-  globalAuthState.idPlano = credentials.idPlano;
+  globalAuthState.idPlano = credentials.idPlano || '';
   globalAuthState.modoExecucao = 'LIVE';
   const cpfMascarado = `${credentials.cpf.substring(0, 3)}.***.***-${credentials.cpf.slice(-2)}`;
   addAuthLog(`[LIVE] Iniciando autenticação OIDC oficial no Sebrae ID para CPF ${cpfMascarado}...`, 'info');
@@ -144,7 +135,7 @@ export async function iniciarSessaoPlaywright(
       meteorSessionId: undefined,
       meteorUserId: (result as any).meteorUserId,
       cpf: credentials.cpf,
-      idPlano: credentials.idPlano,
+      idPlano: credentials.idPlano || '',
       autenticadoEm: new Date(agora).toISOString(),
       expiraEm: new Date(result.expiresAt || agora + TEMPO_VIDA_SESSAO_MINUTOS * 60 * 1000).toISOString(),
       modoExecucao: 'LIVE',
